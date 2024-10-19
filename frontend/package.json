@@ -11,12 +11,15 @@
   },
   "dependencies": {
     "@primevue/themes": "^4.1.1",
+    "canvas-confetti": "^1.9.3",
+    "cobe": "^0.6.3",
     "lucide-vue-next": "^0.453.0",
     "nuxt": "^3.13.0",
     "primevue": "^4.1.1",
     "tailwindcss-primeui": "^0.3.4",
     "vue": "latest",
-    "vue-router": "latest"
+    "vue-router": "latest",
+    "vue-use-spring": "^0.3.3"
   },
   "devDependencies": {
     "@primevue/nuxt-module": "^4.1.1",

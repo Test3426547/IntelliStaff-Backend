@@ -45,6 +45,9 @@ export { default as Globe } from './globe/Globe.vue'
 // Glow Border
 export { default as GlowBorder } from './glow-border/GlowBorder.vue'
 
+// Hyper Text
+export { default as HyperText } from './hyper-text/HyperText.vue'
+
 // Images Slider
 export { default as ImagesSlider } from './images-slider/ImagesSlider.vue'
 
