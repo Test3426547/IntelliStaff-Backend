@@ -13,6 +13,7 @@ import { AuditLoggingModule } from './audit-logging/audit-logging.module';
 import { ErrorHandlingMonitoringModule } from './error-handling-monitoring/error-handling-monitoring.module';
 import { SecurityModule } from './security/security.module';
 import { DataStorageModule } from './data-storage/data-storage.module';
+import { ApiGatewayModule } from './api-gateway/api-gateway.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { DataStorageModule } from './data-storage/data-storage.module';
     ErrorHandlingMonitoringModule,
     SecurityModule,
     DataStorageModule,
+    ApiGatewayModule,
   ],
 })
 export class AppModule {}
