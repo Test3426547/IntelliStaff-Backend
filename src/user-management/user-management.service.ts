@@ -323,4 +323,115 @@ export class UserManagementService extends HealthIndicator {
   startCacheCleanup() {
     setInterval(() => this.clearExpiredCache(), this.CACHE_TTL);
   }
+
+  // New methods for RBAC
+
+  async assignRole(userId: string, role: string): Promise<void> {
+    return this.retryOperation(async () => {
+      const { error } = await this.supabase
+        .from('user_roles')
+        .upsert({ user_id: userId, role }, { onConflict: 'user_id' });
+
+      if (error) throw new Error(`Failed to assign role: ${error.message}`);
+    });
+  }
+
+  async getRoles(): Promise<string[]> {
+    return this.retryOperation(async () => {
+      const { data, error } = await this.supabase
+        .from('roles')
+        .select('name');
+
+      if (error) throw new Error(`Failed to get roles: ${error.message}`);
+      return data.map(role => role.name);
+    });
+  }
+
+  async createRole(roleName: string): Promise<void> {
+    return this.retryOperation(async () => {
+      const { error } = await this.supabase
+        .from('roles')
+        .insert({ name: roleName });
+
+      if (error) throw new Error(`Failed to create role: ${error.message}`);
+    });
+  }
+
+  async deleteRole(roleName: string): Promise<void> {
+    return this.retryOperation(async () => {
+      const { error } = await this.supabase
+        .from('roles')
+        .delete()
+        .eq('name', roleName);
+
+      if (error) throw new Error(`Failed to delete role: ${error.message}`);
+    });
+  }
+
+  async getUsersWithRole(role: string): Promise<any[]> {
+    return this.retryOperation(async () => {
+      const { data, error } = await this.supabase
+        .from('user_roles')
+        .select('users(*)')
+        .eq('role', role);
+
+      if (error) throw new Error(`Failed to get users with role: ${error.message}`);
+      return data.map(item => item.users);
+    });
+  }
+
+  async hasPermission(userId: string, permission: string): Promise<boolean> {
+    return this.retryOperation(async () => {
+      const { data, error } = await this.supabase
+        .from('user_roles')
+        .select('roles(permissions)')
+        .eq('user_id', userId)
+        .single();
+
+      if (error) throw new Error(`Failed to check permission: ${error.message}`);
+      return data.roles.permissions.includes(permission);
+    });
+  }
+
+  async addPermissionToRole(roleName: string, permission: string): Promise<void> {
+    return this.retryOperation(async () => {
+      const { data, error } = await this.supabase
+        .from('roles')
+        .select('permissions')
+        .eq('name', roleName)
+        .single();
+
+      if (error) throw new Error(`Failed to get role permissions: ${error.message}`);
+
+      const updatedPermissions = [...new Set([...data.permissions, permission])];
+
+      const { error: updateError } = await this.supabase
+        .from('roles')
+        .update({ permissions: updatedPermissions })
+        .eq('name', roleName);
+
+      if (updateError) throw new Error(`Failed to add permission to role: ${updateError.message}`);
+    });
+  }
+
+  async removePermissionFromRole(roleName: string, permission: string): Promise<void> {
+    return this.retryOperation(async () => {
+      const { data, error } = await this.supabase
+        .from('roles')
+        .select('permissions')
+        .eq('name', roleName)
+        .single();
+
+      if (error) throw new Error(`Failed to get role permissions: ${error.message}`);
+
+      const updatedPermissions = data.permissions.filter(p => p !== permission);
+
+      const { error: updateError } = await this.supabase
+        .from('roles')
+        .update({ permissions: updatedPermissions })
+        .eq('name', roleName);
+
+      if (updateError) throw new Error(`Failed to remove permission from role: ${updateError.message}`);
+    });
+  }
 }
