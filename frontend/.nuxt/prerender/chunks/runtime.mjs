@@ -55,7 +55,7 @@ function _expandFromEnv(value) {
   });
 }
 
-function isPlainObject$1(value) {
+function isPlainObject(value) {
   if (value === null || typeof value !== "object") {
     return false;
   }
@@ -72,9 +72,9 @@ function isPlainObject$1(value) {
   return true;
 }
 
-function _defu$1(baseObject, defaults, namespace = ".", merger) {
-  if (!isPlainObject$1(defaults)) {
-    return _defu$1(baseObject, {}, namespace, merger);
+function _defu(baseObject, defaults, namespace = ".", merger) {
+  if (!isPlainObject(defaults)) {
+    return _defu(baseObject, {}, namespace, merger);
   }
   const object = Object.assign({}, defaults);
   for (const key in baseObject) {
@@ -90,8 +90,8 @@ function _defu$1(baseObject, defaults, namespace = ".", merger) {
     }
     if (Array.isArray(value) && Array.isArray(object[key])) {
       object[key] = [...value, ...object[key]];
-    } else if (isPlainObject$1(value) && isPlainObject$1(object[key])) {
-      object[key] = _defu$1(
+    } else if (isPlainObject(value) && isPlainObject(object[key])) {
+      object[key] = _defu(
         value,
         object[key],
         (namespace ? `${namespace}.` : "") + key.toString(),
@@ -103,13 +103,14 @@ function _defu$1(baseObject, defaults, namespace = ".", merger) {
   }
   return object;
 }
-function createDefu$1(merger) {
+function createDefu(merger) {
   return (...arguments_) => (
     // eslint-disable-next-line unicorn/no-array-reduce
-    arguments_.reduce((p, c) => _defu$1(p, c, "", merger), {})
+    arguments_.reduce((p, c) => _defu(p, c, "", merger), {})
   );
 }
-const defuFn = createDefu$1((object, key, currentValue) => {
+const defu = createDefu();
+const defuFn = createDefu((object, key, currentValue) => {
   if (object[key] !== void 0 && typeof currentValue === "function") {
     object[key] = currentValue(object[key]);
     return true;
@@ -127,7 +128,7 @@ const appConfig = defuFn(inlineAppConfig);
 const _inlineRuntimeConfig = {
   "app": {
     "baseURL": "/",
-    "buildId": "5138b543-8046-4f0d-8172-58817d2a7a6c",
+    "buildId": "fd3dbd88-0678-49c7-9ec3-096e7ecc313b",
     "buildAssetsDir": "/_nuxt/",
     "cdnURL": ""
   },
@@ -200,7 +201,7 @@ const _inlineRuntimeConfig = {
     "content": {
       "locales": [],
       "defaultLocale": "",
-      "integrity": 1729306088114,
+      "integrity": 1729308693785,
       "experimental": {
         "stripQueryParameters": false,
         "advanceQuery": false,
@@ -412,7 +413,7 @@ for (const asset of serverAssets) {
 }
 
 const normalizeFsKey = (item) => item.replaceAll(":", "_");
-const _47home_47runner_47workspace_47node_modules_47nuxt_47dist_47core_47runtime_47nitro_47cache_45driver_46js = defineDriver((opts) => {
+const _47home_47runner_47workspace_47frontend_47node_modules_47nuxt_47dist_47core_47runtime_47nitro_47cache_45driver_46js = defineDriver((opts) => {
   const fs = fsDriver({ base: opts.base });
   const lru = lruCache({ max: 1e3 });
   return {
@@ -437,7 +438,7 @@ const storage = createStorage({});
 
 storage.mount('/assets', assets$1);
 
-storage.mount('internal:nuxt:prerender', _47home_47runner_47workspace_47node_modules_47nuxt_47dist_47core_47runtime_47nitro_47cache_45driver_46js({"driver":"/home/runner/workspace/node_modules/nuxt/dist/core/runtime/nitro/cache-driver.js","base":"/home/runner/workspace/frontend/.nuxt/cache/nitro/prerender"}));
+storage.mount('internal:nuxt:prerender', _47home_47runner_47workspace_47frontend_47node_modules_47nuxt_47dist_47core_47runtime_47nitro_47cache_45driver_46js({"driver":"/home/runner/workspace/frontend/node_modules/nuxt/dist/core/runtime/nitro/cache-driver.js","base":"/home/runner/workspace/frontend/.nuxt/cache/nitro/prerender"}));
 storage.mount('data', fsDriver({"driver":"fsLite","base":"/home/runner/workspace/frontend/.data/kv"}));
 storage.mount('content:source:content', unstorage_47drivers_47fs({"name":"content:source:content","driver":"fs","base":"/home/runner/workspace/frontend/content","ignore":["**/node_modules/**","**/.git/**"]}));
 storage.mount('cache:content', unstorage_47drivers_47fs({"driver":"fs","base":"/home/runner/workspace/frontend/.nuxt/content-cache","ignore":["**/node_modules/**","**/.git/**"]}));
@@ -825,62 +826,6 @@ function normalizeCookieHeaders(headers) {
   return outgoingHeaders;
 }
 
-function isPlainObject(value) {
-  if (value === null || typeof value !== "object") {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== null && prototype !== Object.prototype && Object.getPrototypeOf(prototype) !== null) {
-    return false;
-  }
-  if (Symbol.iterator in value) {
-    return false;
-  }
-  if (Symbol.toStringTag in value) {
-    return Object.prototype.toString.call(value) === "[object Module]";
-  }
-  return true;
-}
-
-function _defu(baseObject, defaults, namespace = ".", merger) {
-  if (!isPlainObject(defaults)) {
-    return _defu(baseObject, {}, namespace, merger);
-  }
-  const object = Object.assign({}, defaults);
-  for (const key in baseObject) {
-    if (key === "__proto__" || key === "constructor") {
-      continue;
-    }
-    const value = baseObject[key];
-    if (value === null || value === void 0) {
-      continue;
-    }
-    if (merger && merger(object, key, value, namespace)) {
-      continue;
-    }
-    if (Array.isArray(value) && Array.isArray(object[key])) {
-      object[key] = [...value, ...object[key]];
-    } else if (isPlainObject(value) && isPlainObject(object[key])) {
-      object[key] = _defu(
-        value,
-        object[key],
-        (namespace ? `${namespace}.` : "") + key.toString(),
-        merger
-      );
-    } else {
-      object[key] = value;
-    }
-  }
-  return object;
-}
-function createDefu(merger) {
-  return (...arguments_) => (
-    // eslint-disable-next-line unicorn/no-array-reduce
-    arguments_.reduce((p, c) => _defu(p, c, "", merger), {})
-  );
-}
-const defu = createDefu();
-
 const config = useRuntimeConfig();
 const _routeRulesMatcher = toRouteMatcher(
   createRouter({ routes: config.nitro.routeRules })
@@ -1208,19 +1153,19 @@ const _TxmbK1 = lazyEventHandler(() => {
   return useBase(opts.baseURL, ipxHandler);
 });
 
-const _lazy_7ocpuG = () => import('./_/renderer.mjs').then(function (n) { return n.r; });
+const _lazy_w34w8r = () => import('./_/renderer.mjs').then(function (n) { return n.r; });
 
 const handlers = [
   { route: '', handler: _f4b49z, lazy: false, middleware: true, method: undefined },
   { route: '/api/_content/query/:qid/**:params', handler: _j95H8S, lazy: false, middleware: false, method: "get" },
   { route: '/api/_content/query/:qid', handler: _j95H8S, lazy: false, middleware: false, method: "get" },
   { route: '/api/_content/query', handler: _j95H8S, lazy: false, middleware: false, method: "get" },
-  { route: '/api/_content/cache.1729306088114.json', handler: _qcTbYQ, lazy: false, middleware: false, method: "get" },
+  { route: '/api/_content/cache.1729308693785.json', handler: _qcTbYQ, lazy: false, middleware: false, method: "get" },
   { route: '/api/_content/navigation/:qid/**:params', handler: _wCFMwo, lazy: false, middleware: false, method: "get" },
   { route: '/api/_content/navigation/:qid', handler: _wCFMwo, lazy: false, middleware: false, method: "get" },
   { route: '/api/_content/navigation', handler: _wCFMwo, lazy: false, middleware: false, method: "get" },
   { route: '/_ipx/**', handler: _TxmbK1, lazy: false, middleware: false, method: undefined },
-  { route: '/**', handler: _lazy_7ocpuG, lazy: true, middleware: false, method: undefined }
+  { route: '/**', handler: _lazy_w34w8r, lazy: true, middleware: false, method: undefined }
 ];
 
 function createNitroApp() {
@@ -1349,5 +1294,5 @@ const localFetch = nitroApp.localFetch;
 const closePrerenderer = () => nitroApp.hooks.callHook("close");
 trapUnhandledNodeErrors();
 
-export { useNitroApp as a, useStorage as b, getPreview as c, defu as d, closePrerenderer as e, getRouteRules as g, isPreview as i, localFetch as l, useRuntimeConfig as u };
+export { useNitroApp as a, useStorage as b, getPreview as c, closePrerenderer as d, getRouteRules as g, isPreview as i, localFetch as l, useRuntimeConfig as u };
 //# sourceMappingURL=runtime.mjs.map

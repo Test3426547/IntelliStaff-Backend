@@ -14,6 +14,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import * as csurf from 'csurf';
 import * as hpp from 'hpp';
+import { CommonUtils } from './common/common-utils';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -97,7 +98,7 @@ async function bootstrap() {
   // Apply rate limiting globally with a more robust strategy
   app.use(
     ThrottlerModule.forRootAsync({
-      imports: [ConfigModule],
+      imports: [AppModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         ttl: config.get('THROTTLE_TTL', 60),
@@ -145,7 +146,29 @@ async function bootstrap() {
   // Set global prefix
   app.setGlobalPrefix('api');
 
+  // Global error handling
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    // Send to error monitoring service
+    sentryService.captureException(reason);
+  });
+
+  process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    // Send to error monitoring service
+    sentryService.captureException(error);
+    // Gracefully shutdown the server
+    app.close().then(() => process.exit(1));
+  });
+
   // Start the application
-  await app.listen(configService.get('PORT') || 3000);
+  const port = configService.get('PORT') || 3000;
+  await app.listen(port);
+  console.log(`Application is running on: ${await app.getUrl()}`);
 }
-bootstrap();
+
+CommonUtils.retryOperation(bootstrap, 3, 5000)
+  .catch((error) => {
+    console.error('Failed to start the application:', error);
+    process.exit(1);
+  });

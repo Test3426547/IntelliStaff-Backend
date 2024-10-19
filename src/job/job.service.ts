@@ -2,8 +2,7 @@ import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
-import { retry } from 'rxjs/operators';
-import { from } from 'rxjs';
+import { CommonUtils } from '../common/common-utils';
 
 @Injectable()
 export class JobService extends HealthIndicator {
@@ -30,15 +29,7 @@ export class JobService extends HealthIndicator {
   }
 
   private async retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
-    return from(operation()).pipe(
-      retry({
-        count: maxRetries,
-        delay: (error, retryCount) => {
-          this.logger.warn(`Retrying operation. Attempt ${retryCount} of ${maxRetries}`);
-          return Math.pow(2, retryCount) * 1000; // Exponential backoff
-        }
-      })
-    ).toPromise();
+    return CommonUtils.retryOperation(operation, maxRetries);
   }
 
   async createJob(jobData: any): Promise<any> {
@@ -49,7 +40,7 @@ export class JobService extends HealthIndicator {
         return data;
       } catch (error) {
         this.logger.error(`Error creating job: ${error.message}`);
-        throw new InternalServerErrorException('Failed to create job');
+        throw CommonUtils.handleError(error);
       }
     });
   }
@@ -62,7 +53,7 @@ export class JobService extends HealthIndicator {
         return data;
       } catch (error) {
         this.logger.error(`Error getting job: ${error.message}`);
-        throw new InternalServerErrorException('Failed to get job');
+        throw CommonUtils.handleError(error);
       }
     });
   }
@@ -75,7 +66,7 @@ export class JobService extends HealthIndicator {
         return data;
       } catch (error) {
         this.logger.error(`Error updating job: ${error.message}`);
-        throw new InternalServerErrorException('Failed to update job');
+        throw CommonUtils.handleError(error);
       }
     });
   }
@@ -87,7 +78,7 @@ export class JobService extends HealthIndicator {
         if (error) throw new Error(`Failed to delete job: ${error.message}`);
       } catch (error) {
         this.logger.error(`Error deleting job: ${error.message}`);
-        throw new InternalServerErrorException('Failed to delete job');
+        throw CommonUtils.handleError(error);
       }
     });
   }
@@ -104,7 +95,7 @@ export class JobService extends HealthIndicator {
         return { jobs: data, total: count };
       } catch (error) {
         this.logger.error(`Error listing jobs: ${error.message}`);
-        throw new InternalServerErrorException('Failed to list jobs');
+        throw CommonUtils.handleError(error);
       }
     });
   }

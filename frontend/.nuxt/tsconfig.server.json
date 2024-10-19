@@ -129,7 +129,7 @@
   "include": [
     "./types/nitro-nuxt.d.ts",
     "../../node_modules/@nuxtjs/tailwindcss/runtime/server",
-    "../../node_modules/@pinia/nuxt/runtime/server",
+    "../node_modules/@pinia/nuxt/runtime/server",
     "../../node_modules/@vueuse/nuxt/runtime/server",
     "../../node_modules/@nuxt/image/runtime/server",
     "../../node_modules/@nuxtjs/mdc/runtime/server",

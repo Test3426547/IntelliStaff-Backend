@@ -1,20 +1,16 @@
 import { Injectable, Logger, InternalServerErrorException, UnauthorizedException, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { ConfigService } from '@nestjs/config';
-import * as bcrypt from 'bcrypt';
-import { v4 as uuidv4 } from 'uuid';
-import * as crypto from 'crypto';
-import { RateLimiterMemory } from 'rate-limiter-flexible';
 import * as speakeasy from 'speakeasy';
 import * as qrcode from 'qrcode';
 import { HealthCheckError, HealthIndicator, HealthIndicatorResult } from '@nestjs/terminus';
 import { retry } from 'rxjs/operators';
 import { from, throwError } from 'rxjs';
+import { CommonUtils } from '../common/common-utils';
 
 @Injectable()
 export class UserManagementService extends HealthIndicator {
   private supabase: SupabaseClient;
-  private loginRateLimiter: RateLimiterMemory;
   private readonly logger = new Logger(UserManagementService.name);
   private userCache: Map<string, any> = new Map();
   private readonly CACHE_TTL = 300000; // 5 minutes in milliseconds
@@ -25,14 +21,6 @@ export class UserManagementService extends HealthIndicator {
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
     );
-    this.initializeRateLimiter();
-  }
-
-  private initializeRateLimiter() {
-    this.loginRateLimiter = new RateLimiterMemory({
-      points: 5,
-      duration: 60 * 15, // 15 minutes
-    });
   }
 
   async checkHealth(): Promise<HealthIndicatorResult> {
@@ -47,27 +35,19 @@ export class UserManagementService extends HealthIndicator {
   }
 
   private async retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
-    return from(operation()).pipe(
-      retry({
-        count: maxRetries,
-        delay: (error, retryCount) => {
-          this.logger.warn(`Retrying operation. Attempt ${retryCount} of ${maxRetries}`);
-          return Math.pow(2, retryCount) * 1000; // Exponential backoff
-        }
-      })
-    ).toPromise();
+    return CommonUtils.retryOperation(operation, maxRetries);
   }
 
   async register(email: string, password: string, role: string = 'user'): Promise<any> {
-    if (!this.isValidEmail(email)) {
+    if (!CommonUtils.isValidEmail(email)) {
       throw new BadRequestException('Invalid email format');
     }
 
-    if (!this.isStrongPassword(password)) {
+    if (!CommonUtils.isStrongPassword(password)) {
       throw new BadRequestException('Password does not meet strength requirements');
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await CommonUtils.hashPassword(password);
 
     return this.retryOperation(async () => {
       const { data, error } = await this.supabase.auth.signUp({
@@ -77,7 +57,6 @@ export class UserManagementService extends HealthIndicator {
 
       if (error) throw new BadRequestException(`Registration failed: ${error.message}`);
 
-      // Add user role to the database
       await this.supabase.from('user_roles').insert({ user_id: data.user.id, role });
 
       return { user: data.user, message: 'Registration successful. Please check your email to confirm your account.' };
@@ -85,13 +64,7 @@ export class UserManagementService extends HealthIndicator {
   }
 
   async login(email: string, password: string, twoFactorToken?: string): Promise<any> {
-    return this.executeWithRetry(async () => {
-      try {
-        await this.loginRateLimiter.consume(email);
-      } catch (error) {
-        throw new ConflictException('Too many login attempts. Please try again later.');
-      }
-
+    return this.retryOperation(async () => {
       const { data: user, error: userError } = await this.supabase
         .from('users')
         .select('*')
@@ -99,7 +72,6 @@ export class UserManagementService extends HealthIndicator {
         .single();
 
       if (userError || !user) {
-        await this.incrementLoginAttempts(email);
         throw new UnauthorizedException('Invalid credentials');
       }
 
@@ -107,7 +79,7 @@ export class UserManagementService extends HealthIndicator {
         throw new UnauthorizedException('Account is locked. Please try again later.');
       }
 
-      const isPasswordValid = await bcrypt.compare(password, user.password);
+      const isPasswordValid = await CommonUtils.comparePassword(password, user.password);
       if (!isPasswordValid) {
         await this.incrementLoginAttempts(user.id);
         throw new UnauthorizedException('Invalid credentials');
@@ -133,7 +105,7 @@ export class UserManagementService extends HealthIndicator {
       await this.resetLoginAttempts(user.id);
 
       const role = await this.getUserRole(data.user.id);
-      const refreshToken = this.generateRefreshToken();
+      const refreshToken = CommonUtils.generateRandomString(40);
       await this.storeRefreshToken(data.user.id, refreshToken);
 
       return { ...data, role, refreshToken };
@@ -141,18 +113,16 @@ export class UserManagementService extends HealthIndicator {
   }
 
   async logout(token: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       const { error } = await this.supabase.auth.signOut();
       if (error) throw new UnauthorizedException(`Logout failed: ${error.message}`);
 
-      // Revoke the token
       await this.revokeToken(token);
     });
   }
 
   async getUser(token: string): Promise<any> {
-    return this.executeWithRetry(async () => {
-      // Check cache first
+    return this.retryOperation(async () => {
       const cachedUser = this.userCache.get(token);
       if (cachedUser && cachedUser.expiry > Date.now()) {
         return cachedUser.user;
@@ -164,7 +134,6 @@ export class UserManagementService extends HealthIndicator {
       const role = await this.getUserRole(user.id);
       const userData = { ...user, role };
 
-      // Cache the user data
       this.userCache.set(token, {
         user: userData,
         expiry: Date.now() + this.CACHE_TTL
@@ -175,11 +144,11 @@ export class UserManagementService extends HealthIndicator {
   }
 
   async refreshToken(refreshToken: string): Promise<any> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       const { data, error } = await this.supabase.auth.refreshSession({ refresh_token: refreshToken });
       if (error) throw new UnauthorizedException(`Token refresh failed: ${error.message}`);
 
-      const newRefreshToken = this.generateRefreshToken();
+      const newRefreshToken = CommonUtils.generateRandomString(40);
       await this.rotateRefreshToken(data.user.id, refreshToken, newRefreshToken);
 
       return { ...data, refreshToken: newRefreshToken };
@@ -187,8 +156,8 @@ export class UserManagementService extends HealthIndicator {
   }
 
   async resetPassword(email: string): Promise<void> {
-    return this.executeWithRetry(async () => {
-      const resetToken = crypto.randomBytes(32).toString('hex');
+    return this.retryOperation(async () => {
+      const resetToken = CommonUtils.generateRandomString(32);
       const resetTokenExpiry = new Date(Date.now() + 3600000); // Token valid for 1 hour
 
       const { error } = await this.supabase
@@ -197,14 +166,12 @@ export class UserManagementService extends HealthIndicator {
 
       if (error) throw new BadRequestException(`Password reset failed: ${error.message}`);
 
-      // Send password reset email with the token
-      // TODO: Implement email sending functionality
       console.log(`Password reset token for ${email}: ${resetToken}`);
     });
   }
 
   async confirmResetPassword(token: string, newPassword: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       const { data, error } = await this.supabase
         .from('password_reset_tokens')
         .select('*')
@@ -217,11 +184,11 @@ export class UserManagementService extends HealthIndicator {
         throw new BadRequestException('Reset token has expired');
       }
 
-      if (!this.isStrongPassword(newPassword)) {
+      if (!CommonUtils.isStrongPassword(newPassword)) {
         throw new BadRequestException('Password does not meet strength requirements');
       }
 
-      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      const hashedPassword = await CommonUtils.hashPassword(newPassword);
 
       const { error: updateError } = await this.supabase
         .from('users')
@@ -230,7 +197,6 @@ export class UserManagementService extends HealthIndicator {
 
       if (updateError) throw new BadRequestException(`Password reset failed: ${updateError.message}`);
 
-      // Delete the used reset token
       await this.supabase
         .from('password_reset_tokens')
         .delete()
@@ -239,7 +205,7 @@ export class UserManagementService extends HealthIndicator {
   }
 
   async enable2FA(userId: string): Promise<{ secret: string; qrCodeUrl: string }> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       const secret = speakeasy.generateSecret({ length: 32 });
       const otpauthUrl = speakeasy.otpauthURL({
         secret: secret.base32,
@@ -266,18 +232,8 @@ export class UserManagementService extends HealthIndicator {
     });
   }
 
-  private isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  }
-
-  private isStrongPassword(password: string): boolean {
-    const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{12,}$/;
-    return strongPasswordRegex.test(password);
-  }
-
   private async incrementLoginAttempts(userId: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       const { data, error } = await this.supabase
         .from('users')
         .select('login_attempts')
@@ -300,7 +256,7 @@ export class UserManagementService extends HealthIndicator {
   }
 
   private async resetLoginAttempts(userId: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       await this.supabase
         .from('users')
         .update({ login_attempts: 0 })
@@ -309,7 +265,7 @@ export class UserManagementService extends HealthIndicator {
   }
 
   private async lockAccount(userId: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       await this.supabase
         .from('users')
         .update({ is_locked: true, locked_until: new Date(Date.now() + 30 * 60 * 1000) }) // Lock for 30 minutes
@@ -318,7 +274,7 @@ export class UserManagementService extends HealthIndicator {
   }
 
   private async getUserRole(userId: string): Promise<string> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       const { data, error } = await this.supabase
         .from('user_roles')
         .select('role')
@@ -331,19 +287,15 @@ export class UserManagementService extends HealthIndicator {
   }
 
   private async revokeToken(token: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       await this.supabase
         .from('revoked_tokens')
         .insert({ token, revoked_at: new Date().toISOString() });
     });
   }
 
-  private generateRefreshToken(): string {
-    return crypto.randomBytes(40).toString('hex');
-  }
-
   private async storeRefreshToken(userId: string, refreshToken: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       await this.supabase
         .from('refresh_tokens')
         .insert({ user_id: userId, token: refreshToken, created_at: new Date().toISOString() });
@@ -351,16 +303,12 @@ export class UserManagementService extends HealthIndicator {
   }
 
   private async rotateRefreshToken(userId: string, oldToken: string, newToken: string): Promise<void> {
-    return this.executeWithRetry(async () => {
+    return this.retryOperation(async () => {
       await this.supabase
         .from('refresh_tokens')
         .update({ token: newToken, created_at: new Date().toISOString() })
         .match({ user_id: userId, token: oldToken });
     });
-  }
-
-  private async executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
-    return this.retryOperation(operation);
   }
 
   private clearExpiredCache() {

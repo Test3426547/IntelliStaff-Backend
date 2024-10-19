@@ -1,4 +1,4 @@
-import process from 'node:process';globalThis._importMeta_={url:import.meta.url,env:process.env};export { e as closePrerenderer, l as localFetch } from './chunks/runtime.mjs';
+import process from 'node:process';globalThis._importMeta_={url:import.meta.url,env:process.env};export { d as closePrerenderer, l as localFetch } from './chunks/runtime.mjs';
 import 'file:///home/runner/workspace/frontend/node_modules/h3/dist/index.mjs';
 import 'file:///home/runner/workspace/frontend/node_modules/ofetch/dist/node.mjs';
 import 'file:///home/runner/workspace/frontend/node_modules/destr/dist/index.mjs';

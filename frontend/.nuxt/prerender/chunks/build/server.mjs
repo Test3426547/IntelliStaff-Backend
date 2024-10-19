@@ -3,9 +3,9 @@ import { $fetch } from 'file:///home/runner/workspace/frontend/node_modules/ofet
 import { b as baseURL } from '../_/renderer.mjs';
 import { createHooks } from 'file:///home/runner/workspace/frontend/node_modules/hookable/dist/index.mjs';
 import { getContext } from 'file:///home/runner/workspace/frontend/node_modules/unctx/dist/index.mjs';
-import { createError as createError$1, sanitizeStatusCode, appendHeader } from 'file:///home/runner/workspace/frontend/node_modules/h3/dist/index.mjs';
-import { defineHeadPlugin, composableNames } from 'file:///home/runner/workspace/frontend/node_modules/@unhead/shared/dist/index.mjs';
+import { createError as createError$1, sanitizeStatusCode } from 'file:///home/runner/workspace/frontend/node_modules/h3/dist/index.mjs';
 import { CapoPlugin, getActiveHead } from 'file:///home/runner/workspace/frontend/node_modules/unhead/dist/index.mjs';
+import { defineHeadPlugin, composableNames } from 'file:///home/runner/workspace/frontend/node_modules/@unhead/shared/dist/index.mjs';
 import { useRoute as useRoute$1, RouterView, createMemoryHistory, createRouter, START_LOCATION } from 'file:///home/runner/workspace/frontend/node_modules/vue-router/dist/vue-router.node.mjs';
 import { toRouteMatcher, createRouter as createRouter$1 } from 'file:///home/runner/workspace/frontend/node_modules/radix3/dist/index.mjs';
 import { hasProtocol, isScriptProtocol, joinURL, withQuery } from 'file:///home/runner/workspace/frontend/node_modules/ufo/dist/index.mjs';
@@ -450,12 +450,6 @@ function clientUseHead(head, input, options = {}) {
   getCurrentInstance();
   return entry2;
 }
-const coreComposableNames$1 = [
-  "injectHead"
-];
-({
-  "@unhead/vue": [...coreComposableNames$1, ...composableNames]
-});
 const coreComposableNames = [
   "injectHead"
 ];
@@ -463,7 +457,7 @@ const coreComposableNames = [
   "@unhead/vue": [...coreComposableNames, ...composableNames]
 });
 [CapoPlugin({ track: true })];
-const unhead_3Bi0E2Ktsf = /* @__PURE__ */ defineNuxtPlugin({
+const unhead_KgADcZ0jPj = /* @__PURE__ */ defineNuxtPlugin({
   name: "nuxt:head",
   enforce: "pre",
   setup(nuxtApp) {
@@ -609,10 +603,10 @@ const generateRouteKey$1 = (routeProps, override) => {
 const wrapInKeepAlive = (props, children) => {
   return { default: () => children };
 };
-function toArray$1(value) {
+function toArray(value) {
   return Array.isArray(value) ? value : [value];
 }
-function isPlainObject(value) {
+function isPlainObject$1(value) {
   if (value === null || typeof value !== "object") {
     return false;
   }
@@ -628,9 +622,9 @@ function isPlainObject(value) {
   }
   return true;
 }
-function _defu(baseObject, defaults, namespace = ".", merger) {
-  if (!isPlainObject(defaults)) {
-    return _defu(baseObject, {}, namespace);
+function _defu$1(baseObject, defaults, namespace = ".", merger) {
+  if (!isPlainObject$1(defaults)) {
+    return _defu$1(baseObject, {}, namespace);
   }
   const object = Object.assign({}, defaults);
   for (const key in baseObject) {
@@ -643,8 +637,8 @@ function _defu(baseObject, defaults, namespace = ".", merger) {
     }
     if (Array.isArray(value) && Array.isArray(object[key])) {
       object[key] = [...value, ...object[key]];
-    } else if (isPlainObject(value) && isPlainObject(object[key])) {
-      object[key] = _defu(
+    } else if (isPlainObject$1(value) && isPlainObject$1(object[key])) {
+      object[key] = _defu$1(
         value,
         object[key],
         (namespace ? `${namespace}.` : "") + key.toString());
@@ -654,26 +648,26 @@ function _defu(baseObject, defaults, namespace = ".", merger) {
   }
   return object;
 }
-function createDefu(merger) {
+function createDefu$1(merger) {
   return (...arguments_) => (
     // eslint-disable-next-line unicorn/no-array-reduce
-    arguments_.reduce((p, c) => _defu(p, c, ""), {})
+    arguments_.reduce((p, c) => _defu$1(p, c, ""), {})
   );
 }
-const defu = createDefu();
+const defu$1 = createDefu$1();
 async function getRouteRules(url) {
   {
     const _routeRulesMatcher = toRouteMatcher(
       createRouter$1({ routes: (/* @__PURE__ */ useRuntimeConfig()).nitro.routeRules })
     );
-    return defu({}, ..._routeRulesMatcher.matchAll(url).reverse());
+    return defu$1({}, ..._routeRulesMatcher.matchAll(url).reverse());
   }
 }
 const _routes = [
   {
     name: "index",
     path: "/",
-    component: () => import('./index-DFTWm-FY.mjs')
+    component: () => import('./index-BgL5k0hn.mjs')
   }
 ];
 const _wrapIf = (component, props, slots) => {
@@ -809,7 +803,7 @@ const plugin$1 = /* @__PURE__ */ defineNuxtPlugin({
       routerBase += "#";
     }
     const history = ((_a = routerOptions.history) == null ? void 0 : _a.call(routerOptions, routerBase)) ?? createMemoryHistory(routerBase);
-    const routes2 = routerOptions.routes ? ([__temp, __restore] = executeAsync(() => routerOptions.routes(_routes)), __temp = await __temp, __restore(), __temp) ?? _routes : _routes;
+    const routes = routerOptions.routes ? ([__temp, __restore] = executeAsync(() => routerOptions.routes(_routes)), __temp = await __temp, __restore(), __temp) ?? _routes : _routes;
     let startPosition;
     const router = createRouter({
       ...routerOptions,
@@ -830,7 +824,7 @@ const plugin$1 = /* @__PURE__ */ defineNuxtPlugin({
         }
       },
       history,
-      routes: routes2
+      routes
     });
     nuxtApp.vueApp.use(router);
     const previousRoute = shallowRef(router.currentRoute.value);
@@ -921,7 +915,7 @@ const plugin$1 = /* @__PURE__ */ defineNuxtPlugin({
           if (!componentMiddleware) {
             continue;
           }
-          for (const entry2 of toArray$1(componentMiddleware)) {
+          for (const entry2 of toArray(componentMiddleware)) {
             middlewareEntries.add(entry2);
           }
         }
@@ -997,7 +991,7 @@ const reducers = [
   ["Ref", (data) => isRef(data) && data.value],
   ["Reactive", (data) => isReactive(data) && toRaw(data)]
 ];
-const revive_payload_server_ICvz7TjQsJ = /* @__PURE__ */ defineNuxtPlugin({
+const revive_payload_server_eJ33V7gbc6 = /* @__PURE__ */ defineNuxtPlugin({
   name: "nuxt:revive-payload:server",
   setup() {
     for (const [reducer, fn] of reducers) {
@@ -1322,17 +1316,6 @@ function createPinia() {
   }
   return pinia;
 }
-function toArray(value) {
-  return Array.isArray(value) ? value : [value];
-}
-function useRequestEvent(nuxtApp = useNuxtApp()) {
-  var _a;
-  return (_a = nuxtApp.ssrContext) == null ? void 0 : _a.event;
-}
-function prerenderRoutes(path) {
-  const paths = toArray(path);
-  appendHeader(useRequestEvent(), "x-nitro-prerender", paths.map((p) => encodeURIComponent(p)).join(", "));
-}
 const plugin = /* @__PURE__ */ defineNuxtPlugin({
   name: "pinia",
   setup(nuxtApp) {
@@ -1348,12 +1331,12 @@ const plugin = /* @__PURE__ */ defineNuxtPlugin({
     };
   }
 });
-const LazyContentDoc = defineAsyncComponent(() => import('./ContentDoc-CbDdyabD.mjs').then((r) => r["default"] || r.default || r));
-const LazyContentList = defineAsyncComponent(() => import('./ContentList-BGk6vTgG.mjs').then((r) => r["default"] || r.default || r));
-const LazyContentNavigation = defineAsyncComponent(() => import('./ContentNavigation-D8UK8wW-.mjs').then((r) => r["default"] || r.default || r));
-const LazyContentQuery = defineAsyncComponent(() => import('./ContentQuery-BiL6ggo5.mjs').then((r) => r["default"] || r.default || r));
-const LazyContentRenderer = defineAsyncComponent(() => import('./ContentRenderer-viQctRn3.mjs').then((r) => r["default"] || r.default || r));
-const LazyContentRendererMarkdown = defineAsyncComponent(() => import('./ContentRendererMarkdown-DZy3rhQS.mjs').then((r) => r["default"] || r.default || r));
+const LazyContentDoc = defineAsyncComponent(() => import('./ContentDoc-2e_WCafN.mjs').then((r) => r["default"] || r.default || r));
+const LazyContentList = defineAsyncComponent(() => import('./ContentList-CF8ZHh0o.mjs').then((r) => r["default"] || r.default || r));
+const LazyContentNavigation = defineAsyncComponent(() => import('./ContentNavigation-DNSpoglw.mjs').then((r) => r["default"] || r.default || r));
+const LazyContentQuery = defineAsyncComponent(() => import('./ContentQuery-C6HrvRsP.mjs').then((r) => r["default"] || r.default || r));
+const LazyContentRenderer = defineAsyncComponent(() => import('./ContentRenderer-F1az_TFk.mjs').then((r) => r["default"] || r.default || r));
+const LazyContentRendererMarkdown = defineAsyncComponent(() => import('./ContentRendererMarkdown-DS0SKLUZ.mjs').then((r) => r["default"] || r.default || r));
 const LazyContentSlot = defineAsyncComponent(() => import('./ContentSlot-DurpdcEV.mjs').then((r) => r["default"] || r.default || r));
 const LazyDocumentDrivenEmpty = defineAsyncComponent(() => import('./DocumentDrivenEmpty-Cip47SHJ.mjs').then((r) => r["default"] || r.default || r));
 const LazyDocumentDrivenNotFound = defineAsyncComponent(() => import('./DocumentDrivenNotFound-CkdnlFZR.mjs').then((r) => r["default"] || r.default || r));
@@ -1361,17 +1344,17 @@ const LazyMarkdown = defineAsyncComponent(() => import('./Markdown-QprPEHsY.mjs'
 const LazyProseCode = defineAsyncComponent(() => import('./ProseCode-uEOkztpX.mjs').then((r) => r["default"] || r.default || r));
 const LazyProseCodeInline = defineAsyncComponent(() => import('./ProseCodeInline-CWjUfFrX.mjs').then((r) => r["default"] || r.default || r));
 const LazyProsePre = defineAsyncComponent(() => import('./ProsePre-B1EInMfT.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseA = defineAsyncComponent(() => import('./ProseA-1tWPwPs0.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseA = defineAsyncComponent(() => import('./ProseA-DeZAqOvt.mjs').then((r) => r["default"] || r.default || r));
 const LazyProseBlockquote = defineAsyncComponent(() => import('./ProseBlockquote-DyApPYHA.mjs').then((r) => r["default"] || r.default || r));
 const LazyProseEm = defineAsyncComponent(() => import('./ProseEm-C_uUhlbs.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseH1 = defineAsyncComponent(() => import('./ProseH1-re0d1bae.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseH2 = defineAsyncComponent(() => import('./ProseH2-mNH2ZcHK.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseH3 = defineAsyncComponent(() => import('./ProseH3-DCpU5XGh.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseH4 = defineAsyncComponent(() => import('./ProseH4-D4_W_Z3Y.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseH5 = defineAsyncComponent(() => import('./ProseH5-nvf0F5xp.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseH6 = defineAsyncComponent(() => import('./ProseH6-B1ZmqDCS.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseH1 = defineAsyncComponent(() => import('./ProseH1-CZu3atsd.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseH2 = defineAsyncComponent(() => import('./ProseH2-BFAypLHa.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseH3 = defineAsyncComponent(() => import('./ProseH3-BG2Eiqpn.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseH4 = defineAsyncComponent(() => import('./ProseH4-DCnPv6Hh.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseH5 = defineAsyncComponent(() => import('./ProseH5-DtvO0Yuf.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseH6 = defineAsyncComponent(() => import('./ProseH6-Dtg9USbg.mjs').then((r) => r["default"] || r.default || r));
 const LazyProseHr = defineAsyncComponent(() => import('./ProseHr-oG3pCjd1.mjs').then((r) => r["default"] || r.default || r));
-const LazyProseImg = defineAsyncComponent(() => import('./ProseImg-CCOIBYu-.mjs').then((r) => r["default"] || r.default || r));
+const LazyProseImg = defineAsyncComponent(() => import('./ProseImg-DjEgXIgC.mjs').then((r) => r["default"] || r.default || r));
 const LazyProseLi = defineAsyncComponent(() => import('./ProseLi-D-ygEFr_.mjs').then((r) => r["default"] || r.default || r));
 const LazyProseOl = defineAsyncComponent(() => import('./ProseOl-jswEvAGW.mjs').then((r) => r["default"] || r.default || r));
 const LazyProseP = defineAsyncComponent(() => import('./ProseP-CTzRno1G.mjs').then((r) => r["default"] || r.default || r));
@@ -1431,6 +1414,55 @@ const components_plugin_KR1HBZs4kY = /* @__PURE__ */ defineNuxtPlugin({
     }
   }
 });
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== null && prototype !== Object.prototype && Object.getPrototypeOf(prototype) !== null) {
+    return false;
+  }
+  if (Symbol.iterator in value) {
+    return false;
+  }
+  if (Symbol.toStringTag in value) {
+    return Object.prototype.toString.call(value) === "[object Module]";
+  }
+  return true;
+}
+function _defu(baseObject, defaults, namespace = ".", merger) {
+  if (!isPlainObject(defaults)) {
+    return _defu(baseObject, {}, namespace);
+  }
+  const object = Object.assign({}, defaults);
+  for (const key in baseObject) {
+    if (key === "__proto__" || key === "constructor") {
+      continue;
+    }
+    const value = baseObject[key];
+    if (value === null || value === void 0) {
+      continue;
+    }
+    if (Array.isArray(value) && Array.isArray(object[key])) {
+      object[key] = [...value, ...object[key]];
+    } else if (isPlainObject(value) && isPlainObject(object[key])) {
+      object[key] = _defu(
+        value,
+        object[key],
+        (namespace ? `${namespace}.` : "") + key.toString());
+    } else {
+      object[key] = value;
+    }
+  }
+  return object;
+}
+function createDefu(merger) {
+  return (...arguments_) => (
+    // eslint-disable-next-line unicorn/no-array-reduce
+    arguments_.reduce((p, c) => _defu(p, c, ""), {})
+  );
+}
+const defu = createDefu();
 function tryOnScopeDispose(fn) {
   if (getCurrentScope()) {
     onScopeDispose(fn);
@@ -3216,51 +3248,16 @@ const motion_TprQBkCuXT = /* @__PURE__ */ defineNuxtPlugin(
     nuxtApp.vueApp.use(MotionPlugin, config.public.motion);
   }
 );
-let routes;
-const prerender_server_4mA5lpQMZd = /* @__PURE__ */ defineNuxtPlugin(async () => {
-  let __temp, __restore;
-  if (routerOptions.hashMode) {
-    return;
-  }
-  if (routes && !routes.length) {
-    return;
-  }
-  routes || (routes = Array.from(processRoutes(([__temp, __restore] = executeAsync(() => {
-    var _a;
-    return (_a = routerOptions.routes) == null ? void 0 : _a.call(routerOptions, _routes);
-  }), __temp = await __temp, __restore(), __temp) ?? _routes)));
-  const batch = routes.splice(0, 10);
-  prerenderRoutes(batch);
-});
-const OPTIONAL_PARAM_RE = /^\/?:.*(?:\?|\(\.\*\)\*)$/;
-function processRoutes(routes2, currentPath = "/", routesToPrerender = /* @__PURE__ */ new Set()) {
-  var _a;
-  for (const route of routes2) {
-    if (OPTIONAL_PARAM_RE.test(route.path) && !((_a = route.children) == null ? void 0 : _a.length)) {
-      routesToPrerender.add(currentPath);
-    }
-    if (route.path.includes(":")) {
-      continue;
-    }
-    const fullPath = joinURL(currentPath, route.path);
-    routesToPrerender.add(fullPath);
-    if (route.children) {
-      processRoutes(route.children, fullPath, routesToPrerender);
-    }
-  }
-  return routesToPrerender;
-}
 const plugins = [
-  unhead_3Bi0E2Ktsf,
+  unhead_KgADcZ0jPj,
   plugin$1,
-  revive_payload_server_ICvz7TjQsJ,
+  revive_payload_server_eJ33V7gbc6,
   plugin,
   components_plugin_KR1HBZs4kY,
-  motion_TprQBkCuXT,
-  prerender_server_4mA5lpQMZd
+  motion_TprQBkCuXT
 ];
 const layouts = {
-  default: () => import('./default-D68KTyK0.mjs')
+  default: () => import('./default-CQpC2Jd6.mjs')
 };
 const LayoutLoader = defineComponent({
   name: "LayoutLoader",
@@ -3489,9 +3486,9 @@ const __nuxt_component_1 = defineComponent({
 function _mergeTransitionProps(routeProps) {
   const _props = routeProps.map((prop) => ({
     ...prop,
-    onAfterLeave: prop.onAfterLeave ? toArray$1(prop.onAfterLeave) : void 0
+    onAfterLeave: prop.onAfterLeave ? toArray(prop.onAfterLeave) : void 0
   }));
-  return defu(..._props);
+  return defu$1(..._props);
 }
 function hasChildrenRoutes(fork, newRoute, Component) {
   if (!fork) {
@@ -3582,8 +3579,8 @@ const _sfc_main$1 = {
     const statusMessage = _error.statusMessage ?? (is404 ? "Page Not Found" : "Internal Server Error");
     const description = _error.message || _error.toString();
     const stack = void 0;
-    const _Error404 = defineAsyncComponent(() => import('./error-404-CRqjzn64.mjs'));
-    const _Error = defineAsyncComponent(() => import('./error-500-LQDOm-3L.mjs'));
+    const _Error404 = defineAsyncComponent(() => import('./error-404-DANDc-Tc.mjs'));
+    const _Error = defineAsyncComponent(() => import('./error-500-Dsy3u2C5.mjs'));
     const ErrorTemplate = is404 ? _Error404 : _Error;
     return (_ctx, _push, _parent, _attrs) => {
       _push(ssrRenderComponent(unref(ErrorTemplate), mergeProps({ statusCode: unref(statusCode), statusMessage: unref(statusMessage), description: unref(description), stack: unref(stack) }, _attrs), null, _parent));
@@ -3593,7 +3590,7 @@ const _sfc_main$1 = {
 const _sfc_setup$1 = _sfc_main$1.setup;
 _sfc_main$1.setup = (props, ctx) => {
   const ssrContext = useSSRContext();
-  (ssrContext.modules || (ssrContext.modules = /* @__PURE__ */ new Set())).add("../node_modules/nuxt/dist/app/components/nuxt-error-page.vue");
+  (ssrContext.modules || (ssrContext.modules = /* @__PURE__ */ new Set())).add("node_modules/nuxt/dist/app/components/nuxt-error-page.vue");
   return _sfc_setup$1 ? _sfc_setup$1(props, ctx) : void 0;
 };
 const _sfc_main = {
@@ -3641,7 +3638,7 @@ const _sfc_main = {
 const _sfc_setup = _sfc_main.setup;
 _sfc_main.setup = (props, ctx) => {
   const ssrContext = useSSRContext();
-  (ssrContext.modules || (ssrContext.modules = /* @__PURE__ */ new Set())).add("../node_modules/nuxt/dist/app/components/nuxt-root.vue");
+  (ssrContext.modules || (ssrContext.modules = /* @__PURE__ */ new Set())).add("node_modules/nuxt/dist/app/components/nuxt-root.vue");
   return _sfc_setup ? _sfc_setup(props, ctx) : void 0;
 };
 let entry;
@@ -3664,5 +3661,5 @@ let entry;
 }
 const entry$1 = (ssrContext) => entry(ssrContext);
 
-export { useRoute as a, useRuntimeConfig as b, useNuxtApp as c, useRouter as d, entry$1 as default, navigateTo as e, asyncDataDefaults as f, createError as g, useRequestEvent as h, defu as i, nuxtLinkDefaults as n, resolveRouteObject as r, useHead as u };
+export { useRoute as a, useRuntimeConfig as b, useNuxtApp as c, useRouter as d, entry$1 as default, navigateTo as e, asyncDataDefaults as f, createError as g, defu as h, nuxtLinkDefaults as n, resolveRouteObject as r, useHead as u };
 //# sourceMappingURL=server.mjs.map

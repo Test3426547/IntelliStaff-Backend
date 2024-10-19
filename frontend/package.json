@@ -7,9 +7,10 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "vue-demi-switch 3"
   },
   "dependencies": {
+    "@pinia/nuxt": "^0.5.5",
     "@primevue/themes": "^4.1.1",
     "canvas-confetti": "^1.9.3",
     "cobe": "^0.6.3",
@@ -18,7 +19,7 @@
     "primevue": "^4.1.1",
     "tailwindcss-primeui": "^0.3.4",
     "vue": "^3.5.12",
-    "vue-demi": "^0.14.6",
+    "vue-demi": "^0.14.10",
     "vue-router": "latest",
     "vue-use-spring": "^0.3.3"
   },

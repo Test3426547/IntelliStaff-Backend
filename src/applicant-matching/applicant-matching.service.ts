@@ -2,8 +2,7 @@ import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
-import { retry } from 'rxjs/operators';
-import { from } from 'rxjs';
+import { CommonUtils } from '../common/common-utils';
 
 @Injectable()
 export class ApplicantMatchingService extends HealthIndicator {
@@ -30,15 +29,7 @@ export class ApplicantMatchingService extends HealthIndicator {
   }
 
   private async retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
-    return from(operation()).pipe(
-      retry({
-        count: maxRetries,
-        delay: (error, retryCount) => {
-          this.logger.warn(`Retrying operation. Attempt ${retryCount} of ${maxRetries}`);
-          return Math.pow(2, retryCount) * 1000; // Exponential backoff
-        }
-      })
-    ).toPromise();
+    return CommonUtils.retryOperation(operation, maxRetries);
   }
 
   async matchApplicantToJob(applicantId: string, jobId: string): Promise<any> {
@@ -53,7 +44,7 @@ export class ApplicantMatchingService extends HealthIndicator {
         return data;
       } catch (error) {
         this.logger.error(`Error matching applicant to job: ${error.message}`);
-        throw new InternalServerErrorException('Failed to match applicant to job');
+        throw CommonUtils.handleError(error);
       }
     });
   }
@@ -70,7 +61,7 @@ export class ApplicantMatchingService extends HealthIndicator {
         return data;
       } catch (error) {
         this.logger.error(`Error getting matches for applicant: ${error.message}`);
-        throw new InternalServerErrorException('Failed to get matches for applicant');
+        throw CommonUtils.handleError(error);
       }
     });
   }
@@ -87,7 +78,7 @@ export class ApplicantMatchingService extends HealthIndicator {
         return data;
       } catch (error) {
         this.logger.error(`Error getting matches for job: ${error.message}`);
-        throw new InternalServerErrorException('Failed to get matches for job');
+        throw CommonUtils.handleError(error);
       }
     });
   }
@@ -103,7 +94,7 @@ export class ApplicantMatchingService extends HealthIndicator {
         if (error) throw new Error(`Failed to remove match: ${error.message}`);
       } catch (error) {
         this.logger.error(`Error removing match: ${error.message}`);
-        throw new InternalServerErrorException('Failed to remove match');
+        throw CommonUtils.handleError(error);
       }
     });
   }
