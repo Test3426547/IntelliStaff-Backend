@@ -1,17 +1,12 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ResumeIngestionService } from './resume-ingestion.service';
 import { ResumeIngestionController } from './resume-ingestion.controller';
-import { EmailParserService } from './email-parser.service';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { TerminusModule } from '@nestjs/terminus';
 
 @Module({
-  imports: [
-    ThrottlerModule.forRoot({
-      ttl: 60,
-      limit: 10,
-    }),
-  ],
-  providers: [ResumeIngestionService, EmailParserService],
+  imports: [ConfigModule, TerminusModule],
+  providers: [ResumeIngestionService],
   controllers: [ResumeIngestionController],
   exports: [ResumeIngestionService],
 })

@@ -1,197 +1,148 @@
 import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { EmailParserService } from './email-parser.service';
+import * as amqp from 'amqplib';
 import * as nodemailer from 'nodemailer';
-import pdfParse from 'pdf-parse';
-import * as mammoth from 'mammoth';
+import * as simpleParser from 'mailparser';
+import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
 
 @Injectable()
-export class ResumeIngestionService {
+export class ResumeIngestionService extends HealthIndicator {
   private supabase: SupabaseClient;
   private readonly logger = new Logger(ResumeIngestionService.name);
-  private transporter: nodemailer.Transporter;
+  private rabbitmqConnection: amqp.Connection;
+  private rabbitmqChannel: amqp.Channel;
 
-  constructor(
-    private configService: ConfigService,
-    private emailParserService: EmailParserService,
-  ) {
+  constructor(private configService: ConfigService) {
+    super();
     this.supabase = createClient(
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
     );
-    this.initializeEmailTransporter();
+    this.initializeRabbitMQ();
   }
 
-  private initializeEmailTransporter() {
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('SMTP_HOST'),
-      port: this.configService.get<number>('SMTP_PORT'),
-      secure: true,
-      auth: {
-        user: this.configService.get<string>('SMTP_USER'),
-        pass: this.configService.get<string>('SMTP_PASSWORD'),
-      },
-    });
+  private async initializeRabbitMQ() {
+    try {
+      this.rabbitmqConnection = await amqp.connect(this.configService.get<string>('RABBITMQ_URL'));
+      this.rabbitmqChannel = await this.rabbitmqConnection.createChannel();
+      await this.rabbitmqChannel.assertQueue('resume_ingestion', { durable: true });
+      this.logger.log('RabbitMQ connection established');
+    } catch (error) {
+      this.logger.error(`Failed to connect to RabbitMQ: ${error.message}`);
+    }
   }
 
   async uploadResume(file: Express.Multer.File): Promise<string> {
     try {
-      if (!file || !file.buffer) {
-        throw new BadRequestException('Invalid file upload');
+      if (!file) {
+        throw new BadRequestException('No file uploaded');
       }
 
-      const fileName = `${Date.now()}-${file.originalname}`;
       const { data, error } = await this.supabase.storage
         .from('resumes')
-        .upload(fileName, file.buffer, {
-          upsert: true,
+        .upload(`${Date.now()}_${file.originalname}`, file.buffer, {
           contentType: file.mimetype,
         });
 
       if (error) {
-        this.logger.error(`Failed to upload resume to Supabase Storage: ${error.message}`);
-        throw new InternalServerErrorException('Failed to upload resume');
+        throw new Error(`Failed to upload resume to Supabase Storage: ${error.message}`);
       }
 
-      this.logger.log(`Resume uploaded successfully to Supabase Storage: ${data.path}`);
-      
-      const extractedText = await this.extractTextFromFile(file);
-      await this.storeResumeMetadata(data.path, extractedText);
+      const resumeUrl = data.path;
+      await this.rabbitmqChannel.sendToQueue('resume_ingestion', Buffer.from(JSON.stringify({ resumeUrl })));
 
-      return data.path;
+      return resumeUrl;
     } catch (error) {
       this.logger.error(`Error in uploadResume: ${error.message}`);
-      if (error instanceof BadRequestException || error instanceof InternalServerErrorException) {
+      if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new InternalServerErrorException('An unexpected error occurred while uploading the resume');
+      throw new InternalServerErrorException('Failed to upload resume');
     }
   }
 
-  private async extractTextFromFile(file: Express.Multer.File): Promise<string> {
-    try {
-      const fileExtension = file.originalname.split('.').pop().toLowerCase();
-      let text = '';
-
-      switch (fileExtension) {
-        case 'pdf':
-          const pdfData = await pdfParse(file.buffer);
-          text = pdfData.text;
-          break;
-        case 'doc':
-        case 'docx':
-          const result = await mammoth.extractRawText({ buffer: file.buffer });
-          text = result.value;
-          break;
-        case 'txt':
-          text = file.buffer.toString('utf-8');
-          break;
-        default:
-          throw new BadRequestException('Unsupported file format');
-      }
-
-      return text;
-    } catch (error) {
-      this.logger.error(`Error extracting text from file: ${error.message}`);
-      throw new BadRequestException('Failed to extract text from the file');
-    }
-  }
-
-  private async storeResumeMetadata(path: string, extractedText: string): Promise<void> {
-    try {
-      const { error } = await this.supabase
-        .from('processed_resumes')
-        .insert({
-          file_path: path,
-          extracted_text: extractedText,
-          created_at: new Date().toISOString(),
-        });
-
-      if (error) {
-        throw new Error(`Failed to store resume metadata: ${error.message}`);
-      }
-    } catch (error) {
-      this.logger.error(`Error storing resume metadata: ${error.message}`);
-      throw new InternalServerErrorException('Failed to store resume metadata');
-    }
-  }
-
-  async ingestResumeFromEmail(email: string): Promise<string> {
-    try {
-      const resumeContent = await this.emailParserService.extractResumeFromEmail(email);
-      const fileName = `${Date.now()}-parsed-resume.txt`;
-
-      const { data, error } = await this.supabase.storage
-        .from('resumes')
-        .upload(fileName, Buffer.from(resumeContent), {
-          upsert: true,
-          contentType: 'text/plain',
-        });
-
-      if (error) {
-        this.logger.error(`Failed to store parsed resume in Supabase Storage: ${error.message}`);
-        throw new InternalServerErrorException('Failed to store parsed resume');
-      }
-
-      this.logger.log(`Resume ingested from email and stored in Supabase Storage: ${data.path}`);
-      await this.storeResumeMetadata(data.path, resumeContent);
-      return data.path;
-    } catch (error) {
-      this.logger.error(`Failed to ingest resume from email: ${error.message}`);
-      if (error instanceof InternalServerErrorException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('An unexpected error occurred while ingesting the resume from email');
-    }
-  }
-
-  async getResumes(page: number = 1, pageSize: number = 10): Promise<{ resumes: any[], totalCount: number }> {
+  async getResumes(page: number = 1, limit: number = 10): Promise<{ resumes: any[], total: number }> {
     try {
       const { data, error, count } = await this.supabase
-        .from('processed_resumes')
+        .from('resumes')
         .select('*', { count: 'exact' })
-        .range((page - 1) * pageSize, page * pageSize - 1)
-        .order('created_at', { ascending: false });
+        .range((page - 1) * limit, page * limit - 1);
 
       if (error) {
         throw new Error(`Failed to fetch resumes: ${error.message}`);
       }
 
-      const resumes = await Promise.all(data.map(async (resume) => {
-        const { data: fileData, error: fileError } = await this.supabase.storage
+      const resumesWithUrls = await Promise.all(data.map(async (resume) => {
+        const { data: urlData } = await this.supabase.storage
           .from('resumes')
-          .createSignedUrl(resume.file_path, 60); // Create a signed URL valid for 60 seconds
+          .createSignedUrl(resume.file_path, 3600); // URL valid for 1 hour
 
-        if (fileError) {
-          this.logger.error(`Failed to create signed URL for resume ${resume.file_path}: ${fileError.message}`);
-          return { ...resume, fileUrl: null };
-        }
-
-        return { ...resume, fileUrl: fileData.signedUrl };
+        return { ...resume, signedUrl: urlData.signedUrl };
       }));
 
-      return { resumes, totalCount: count };
+      return { resumes: resumesWithUrls, total: count };
     } catch (error) {
       this.logger.error(`Error fetching resumes: ${error.message}`);
       throw new InternalServerErrorException('Failed to fetch resumes');
     }
   }
 
-  async sendConfirmationEmail(to: string, resumePath: string): Promise<void> {
-    const mailOptions = {
-      from: this.configService.get<string>('EMAIL_FROM'),
-      to: to,
-      subject: 'Resume Received Confirmation',
-      text: `Thank you for submitting your resume. Your resume has been successfully received and stored with the reference: ${resumePath}`,
-    };
-
+  async ingestResumeFromEmail(email: string): Promise<void> {
     try {
-      await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Confirmation email sent to ${to}`);
+      const transporter = nodemailer.createTransport({
+        host: this.configService.get<string>('SMTP_HOST'),
+        port: this.configService.get<number>('SMTP_PORT'),
+        secure: false,
+        auth: {
+          user: this.configService.get<string>('SMTP_USER'),
+          pass: this.configService.get<string>('SMTP_PASSWORD'),
+        },
+      });
+
+      const fetchedEmails = await transporter.fetchMail({
+        from: email,
+        unseen: true,
+        limit: 10,
+      });
+
+      for (const mail of fetchedEmails) {
+        const parsed = await simpleParser(mail.content);
+        
+        if (parsed.attachments && parsed.attachments.length > 0) {
+          for (const attachment of parsed.attachments) {
+            if (this.isResumeFile(attachment.filename)) {
+              const resumeBuffer = Buffer.from(attachment.content);
+              const resumeUrl = await this.uploadResume({
+                buffer: resumeBuffer,
+                originalname: attachment.filename,
+                mimetype: attachment.contentType,
+              } as Express.Multer.File);
+
+              await this.rabbitmqChannel.sendToQueue('resume_ingestion', Buffer.from(JSON.stringify({ resumeUrl })));
+            }
+          }
+        }
+      }
     } catch (error) {
-      this.logger.error(`Failed to send confirmation email: ${error.message}`);
-      throw new InternalServerErrorException('Failed to send confirmation email');
+      this.logger.error(`Error ingesting resume from email: ${error.message}`);
+      throw new InternalServerErrorException('Failed to ingest resume from email');
+    }
+  }
+
+  private isResumeFile(filename: string): boolean {
+    const allowedExtensions = ['.pdf', '.doc', '.docx'];
+    return allowedExtensions.some(ext => filename.toLowerCase().endsWith(ext));
+  }
+
+  async checkHealth(): Promise<HealthIndicatorResult> {
+    try {
+      const { data, error } = await this.supabase.from('resumes').select('id').limit(1);
+      if (error) throw error;
+      return this.getStatus('resume_ingestion_db', true, { message: 'Resume Ingestion DB is healthy' });
+    } catch (error) {
+      this.logger.error(`Health check failed: ${error.message}`);
+      throw new HealthCheckError('Resume Ingestion DB check failed', error);
     }
   }
 }

@@ -1,65 +1,50 @@
-import { Controller, Post, UploadedFile, UseInterceptors, Body, Get, Query, UseGuards, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, UseInterceptors, UploadedFile, Body, Query, UseGuards } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ResumeIngestionService } from './resume-ingestion.service';
-import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiQuery, ApiBody } from '@nestjs/swagger';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { AuthGuard } from '../user-management/auth.guard';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 
 @ApiTags('resume-ingestion')
 @Controller('resume-ingestion')
-@UseGuards(ThrottlerGuard)
+@UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class ResumeIngestionController {
-  constructor(private readonly resumeIngestionService: ResumeIngestionService) {}
+  constructor(
+    private readonly resumeIngestionService: ResumeIngestionService,
+    private health: HealthCheckService
+  ) {}
 
   @Post('upload')
-  @ApiOperation({ summary: 'Upload and process a resume file' })
-  @ApiResponse({ status: 201, description: 'Resume uploaded and processed successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        file: {
-          type: 'string',
-          format: 'binary',
-        },
-        email: {
-          type: 'string',
-        },
-      },
-    },
-  })
   @UseInterceptors(FileInterceptor('file'))
-  @HttpCode(HttpStatus.CREATED)
-  async uploadResume(@UploadedFile() file: Express.Multer.File, @Body('email') email: string) {
-    const path = await this.resumeIngestionService.uploadResume(file);
-    await this.resumeIngestionService.sendConfirmationEmail(email, path);
-    return { message: 'Resume uploaded and processed successfully', path };
+  @ApiOperation({ summary: 'Upload a resume' })
+  @ApiResponse({ status: 201, description: 'Resume uploaded successfully' })
+  async uploadResume(@UploadedFile() file: Express.Multer.File) {
+    return this.resumeIngestionService.uploadResume(file);
   }
 
   @Post('ingest-email')
   @ApiOperation({ summary: 'Ingest resume from email' })
-  @ApiResponse({ status: 201, description: 'Resume ingested successfully from email' })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
-  @HttpCode(HttpStatus.CREATED)
+  @ApiResponse({ status: 201, description: 'Resume ingested from email successfully' })
   async ingestResumeFromEmail(@Body('email') email: string) {
-    const path = await this.resumeIngestionService.ingestResumeFromEmail(email);
-    await this.resumeIngestionService.sendConfirmationEmail(email, path);
-    return { message: 'Resume ingested successfully from email', path };
+    return this.resumeIngestionService.ingestResumeFromEmail(email);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all processed resumes' })
-  @ApiResponse({ status: 200, description: 'Return all processed resumes' })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'pageSize', required: false, type: Number })
-  async getResumes(
-    @Query('page') page: number = 1,
-    @Query('pageSize') pageSize: number = 10
-  ): Promise<{ resumes: any[], totalCount: number }> {
-    return this.resumeIngestionService.getResumes(page, pageSize);
+  @ApiOperation({ summary: 'Get resumes' })
+  @ApiResponse({ status: 200, description: 'Resumes retrieved successfully' })
+  async getResumes(@Query('page') page: number = 1, @Query('limit') limit: number = 10) {
+    return this.resumeIngestionService.getResumes(page, limit);
+  }
+
+  @Get('health')
+  @HealthCheck()
+  @ApiOperation({ summary: 'Check the health of the Resume Ingestion service' })
+  @ApiResponse({ status: 200, description: 'Service is healthy' })
+  @ApiResponse({ status: 503, description: 'Service is unhealthy' })
+  async checkHealth() {
+    return this.health.check([
+      () => this.resumeIngestionService.checkHealth(),
+    ]);
   }
 }
