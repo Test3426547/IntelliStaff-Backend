@@ -7,6 +7,7 @@ import { ApplicantMatchingModule } from './applicant-matching/applicant-matching
 import { CommunicationModule } from './communication/communication.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InvoicingBillingModule } from './invoicing-billing/invoicing-billing.module';
+import { MlModelManagementModule } from './ml-model-management/ml-model-management.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { InvoicingBillingModule } from './invoicing-billing/invoicing-billing.mo
     CommunicationModule,
     AnalyticsModule,
     InvoicingBillingModule,
+    MlModelManagementModule,
   ],
 })
 export class AppModule {}

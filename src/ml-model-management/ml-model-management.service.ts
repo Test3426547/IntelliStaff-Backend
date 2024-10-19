@@ -1,23 +1,21 @@
-import { Injectable, BadRequestException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
+import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
 import * as tf from '@tensorflow/tfjs-node';
-import { LoggingService } from '../common/services/logging.service';
+import axios from 'axios';
+import * as uuid from 'uuid';
 
 @Injectable()
-export class MlModelManagementService {
+export class MlModelManagementService extends HealthIndicator {
   private supabase: SupabaseClient;
+  private readonly logger = new Logger(MlModelManagementService.name);
   private huggingfaceApiKey: string;
   private huggingfaceInferenceEndpoint: string;
-  private modelCache: Map<string, { model: any; expiration: number }> = new Map();
-  private readonly CACHE_EXPIRATION = 3600000; // 1 hour in milliseconds
+  private modelCache: Map<string, { model: tf.LayersModel, lastUsed: Date }> = new Map();
 
-  constructor(
-    private configService: ConfigService,
-    private loggingService: LoggingService
-  ) {
+  constructor(private configService: ConfigService) {
+    super();
     this.supabase = createClient(
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
@@ -26,106 +24,98 @@ export class MlModelManagementService {
     this.huggingfaceInferenceEndpoint = this.configService.get<string>('HUGGINGFACE_INFERENCE_ENDPOINT');
   }
 
-  async getModel(modelName: string, version?: string): Promise<any> {
+  async checkHealth(): Promise<HealthIndicatorResult> {
     try {
-      const cacheKey = `${modelName}:${version || 'latest'}`;
-      const cachedModel = this.modelCache.get(cacheKey);
-
-      if (cachedModel && cachedModel.expiration > Date.now()) {
-        this.loggingService.debug(`Cache hit for model: ${modelName}, version: ${version || 'latest'}`, 'MlModelManagementService');
-        return cachedModel.model;
-      }
-
-      const { data, error } = await this.supabase
-        .from('ml_models')
-        .select('*')
-        .eq('name', modelName)
-        .order('version', { ascending: false })
-        .limit(1);
-
-      if (error) throw new InternalServerErrorException(`Failed to fetch model: ${error.message}`);
-      if (data.length === 0) throw new NotFoundException(`Model ${modelName} not found`);
-
-      const model = data[0];
-      this.modelCache.set(cacheKey, { model, expiration: Date.now() + this.CACHE_EXPIRATION });
-      return model;
+      const { data, error } = await this.supabase.from('ml_models').select('id').limit(1);
+      if (error) throw error;
+      return this.getStatus('ml_model_management_db', true, { message: 'ML Model Management DB is healthy' });
     } catch (error) {
-      this.loggingService.error(`Error in getModel: ${error.message}`, error.stack, 'MlModelManagementService');
-      throw error;
+      this.logger.error(`Health check failed: ${error.message}`);
+      throw new HealthCheckError('ML Model Management DB check failed', error);
     }
   }
 
-  async updateModel(modelName: string, modelData: any, metadata: any): Promise<void> {
+  async storeModel(modelName: string, modelVersion: string, modelData: any): Promise<string> {
     try {
-      if (!modelName || !modelData) {
-        throw new BadRequestException('Model name and data are required');
-      }
+      const modelId = uuid.v4();
+      const { error } = await this.supabase.from('ml_models').insert({
+        id: modelId,
+        name: modelName,
+        version: modelVersion,
+        data: modelData,
+        created_at: new Date().toISOString(),
+      });
 
-      const version = this.generateVersion();
-      const { error } = await this.supabase
-        .from('ml_models')
-        .insert({
-          name: modelName,
-          version,
-          data: modelData,
-          metadata,
-          created_at: new Date().toISOString(),
-          status: 'active',
-        });
+      if (error) throw new Error(`Failed to store model: ${error.message}`);
 
-      if (error) throw new InternalServerErrorException(`Failed to update model: ${error.message}`);
-      
-      this.modelCache.clear(); // Clear cache on update
-      await this.logModelLifecycleEvent(modelName, version, 'created');
-      await this.logModelUpdate(modelName, version, 'Model updated');
-      this.loggingService.log(`Model ${modelName} updated successfully with version ${version}`, 'MlModelManagementService');
+      return modelId;
     } catch (error) {
-      this.loggingService.error(`Error in updateModel: ${error.message}`, error.stack, 'MlModelManagementService');
-      throw error;
+      this.logger.error(`Error storing model: ${error.message}`);
+      throw new InternalServerErrorException('Failed to store model');
     }
   }
 
-  async getAllModelVersions(modelName: string): Promise<any[]> {
+  async retrieveModel(modelId: string): Promise<any> {
     try {
       const { data, error } = await this.supabase
         .from('ml_models')
         .select('*')
-        .eq('name', modelName)
-        .order('version', { ascending: false });
+        .eq('id', modelId)
+        .single();
 
-      if (error) throw new InternalServerErrorException(`Failed to fetch model versions: ${error.message}`);
-      if (data.length === 0) throw new NotFoundException(`Model ${modelName} not found`);
+      if (error) throw new Error(`Failed to retrieve model: ${error.message}`);
 
       return data;
     } catch (error) {
-      this.loggingService.error(`Error in getAllModelVersions: ${error.message}`, error.stack, 'MlModelManagementService');
-      throw error;
+      this.logger.error(`Error retrieving model: ${error.message}`);
+      throw new InternalServerErrorException('Failed to retrieve model');
     }
   }
 
-  async trackModelPerformance(modelName: string, version: string, metrics: any): Promise<void> {
+  async updateModel(modelId: string, updateData: any): Promise<void> {
     try {
       const { error } = await this.supabase
-        .from('model_performance')
-        .insert({
-          model_name: modelName,
-          version,
-          metrics,
-          timestamp: new Date().toISOString(),
-        });
+        .from('ml_models')
+        .update(updateData)
+        .eq('id', modelId);
 
-      if (error) throw new InternalServerErrorException(`Failed to track model performance: ${error.message}`);
-      this.loggingService.log(`Performance metrics tracked for model ${modelName} version ${version}`, 'MlModelManagementService');
+      if (error) throw new Error(`Failed to update model: ${error.message}`);
     } catch (error) {
-      this.loggingService.error(`Error in trackModelPerformance: ${error.message}`, error.stack, 'MlModelManagementService');
-      throw error;
+      this.logger.error(`Error updating model: ${error.message}`);
+      throw new InternalServerErrorException('Failed to update model');
+    }
+  }
+
+  async deleteModel(modelId: string): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('ml_models')
+        .delete()
+        .eq('id', modelId);
+
+      if (error) throw new Error(`Failed to delete model: ${error.message}`);
+    } catch (error) {
+      this.logger.error(`Error deleting model: ${error.message}`);
+      throw new InternalServerErrorException('Failed to delete model');
+    }
+  }
+
+  async runInference(modelId: string, inputData: any): Promise<any> {
+    try {
+      const model = await this.getCachedModel(modelId);
+      const inputTensor = tf.tensor(inputData);
+      const output = model.predict(inputTensor);
+      return output.arraySync();
+    } catch (error) {
+      this.logger.error(`Error running inference: ${error.message}`);
+      throw new InternalServerErrorException('Failed to run inference');
     }
   }
 
   async runHuggingFaceInference(modelName: string, inputData: any): Promise<any> {
     try {
       const response = await axios.post(
-        this.huggingfaceInferenceEndpoint,
+        `${this.huggingfaceInferenceEndpoint}/${modelName}`,
         { inputs: inputData },
         {
           headers: {
@@ -134,119 +124,135 @@ export class MlModelManagementService {
           },
         }
       );
-
       return response.data;
     } catch (error) {
-      this.loggingService.error(`Error in runHuggingFaceInference: ${error.message}`, error.stack, 'MlModelManagementService');
-      throw new InternalServerErrorException('Failed to run inference using HuggingFace API');
+      this.logger.error(`Error running HuggingFace inference: ${error.message}`);
+      throw new InternalServerErrorException('Failed to run HuggingFace inference');
     }
   }
 
-  async compareModelVersions(modelName: string, versions: string[]): Promise<any> {
+  async monitorModelPerformance(modelId: string, metrics: any): Promise<void> {
     try {
-      const performanceData = await Promise.all(versions.map(async (version) => {
-        const { data, error } = await this.supabase
-          .from('model_performance')
-          .select('*')
-          .eq('model_name', modelName)
-          .eq('version', version)
-          .order('timestamp', { ascending: false })
-          .limit(1);
+      const { error } = await this.supabase.from('model_performance').insert({
+        model_id: modelId,
+        metrics: metrics,
+        timestamp: new Date().toISOString(),
+      });
 
-        if (error) throw new InternalServerErrorException(`Failed to fetch performance data: ${error.message}`);
-        return { version, performance: data[0] };
-      }));
-
-      return performanceData;
+      if (error) throw new Error(`Failed to store model performance: ${error.message}`);
     } catch (error) {
-      this.loggingService.error(`Error in compareModelVersions: ${error.message}`, error.stack, 'MlModelManagementService');
-      throw error;
+      this.logger.error(`Error monitoring model performance: ${error.message}`);
+      throw new InternalServerErrorException('Failed to monitor model performance');
     }
   }
 
-  async rollbackModel(modelName: string, version: string): Promise<void> {
+  async getModelPerformanceHistory(modelId: string): Promise<any[]> {
     try {
       const { data, error } = await this.supabase
-        .from('ml_models')
+        .from('model_performance')
         .select('*')
-        .eq('name', modelName)
-        .eq('version', version)
-        .single();
+        .eq('model_id', modelId)
+        .order('timestamp', { ascending: false });
 
-      if (error) throw new NotFoundException(`Model version not found: ${error.message}`);
+      if (error) throw new Error(`Failed to retrieve model performance history: ${error.message}`);
 
-      const newVersion = this.generateVersion();
-      const { error: insertError } = await this.supabase
-        .from('ml_models')
-        .insert({
-          ...data,
-          version: newVersion,
-          created_at: new Date().toISOString(),
-          status: 'active',
-        });
-
-      if (insertError) throw new InternalServerErrorException(`Failed to rollback model: ${insertError.message}`);
-
-      this.modelCache.clear(); // Clear cache on rollback
-      await this.logModelLifecycleEvent(modelName, newVersion, 'rolled back');
-      this.loggingService.log(`Model ${modelName} rolled back to version ${version} with new version ${newVersion}`, 'MlModelManagementService');
+      return data;
     } catch (error) {
-      this.loggingService.error(`Error in rollbackModel: ${error.message}`, error.stack, 'MlModelManagementService');
-      throw error;
+      this.logger.error(`Error getting model performance history: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get model performance history');
     }
   }
 
-  private generateVersion(): string {
-    return `${new Date().toISOString().replace(/[-:T.]/g, '')}_${uuidv4().substr(0, 8)}`;
-  }
-
-  private async logModelLifecycleEvent(modelName: string, version: string, event: string): Promise<void> {
+  async runABTest(modelAId: string, modelBId: string, testData: any): Promise<any> {
     try {
-      const { error } = await this.supabase
-        .from('model_lifecycle_events')
-        .insert({
-          model_name: modelName,
-          version,
-          event,
-          timestamp: new Date().toISOString(),
-        });
+      const modelA = await this.getCachedModel(modelAId);
+      const modelB = await this.getCachedModel(modelBId);
 
-      if (error) throw new Error(`Failed to log model lifecycle event: ${error.message}`);
+      const inputTensor = tf.tensor(testData);
+      const outputA = modelA.predict(inputTensor);
+      const outputB = modelB.predict(inputTensor);
+
+      const resultA = outputA.arraySync();
+      const resultB = outputB.arraySync();
+
+      return { modelA: resultA, modelB: resultB };
     } catch (error) {
-      this.loggingService.error(`Error in logModelLifecycleEvent: ${error.message}`, error.stack, 'MlModelManagementService');
+      this.logger.error(`Error running A/B test: ${error.message}`);
+      throw new InternalServerErrorException('Failed to run A/B test');
     }
   }
 
-  private async logModelUpdate(modelName: string, version: string, description: string): Promise<void> {
+  async getABTestHistory(): Promise<any[]> {
     try {
-      const { error } = await this.supabase
-        .from('model_updates')
-        .insert({
-          model_name: modelName,
-          version,
-          description,
-          timestamp: new Date().toISOString(),
-        });
+      const { data, error } = await this.supabase
+        .from('ab_tests')
+        .select('*')
+        .order('timestamp', { ascending: false });
 
-      if (error) throw new Error(`Failed to log model update: ${error.message}`);
+      if (error) throw new Error(`Failed to retrieve A/B test history: ${error.message}`);
+
+      return data;
     } catch (error) {
-      this.loggingService.error(`Error in logModelUpdate: ${error.message}`, error.stack, 'MlModelManagementService');
+      this.logger.error(`Error getting A/B test history: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get A/B test history');
     }
   }
 
-  clearExpiredCache(): void {
-    const now = Date.now();
-    let clearedCount = 0;
-    for (const [key, value] of this.modelCache.entries()) {
-      if (value.expiration <= now) {
-        this.modelCache.delete(key);
-        clearedCount++;
-      }
+  private async getCachedModel(modelId: string): Promise<tf.LayersModel> {
+    if (this.modelCache.has(modelId)) {
+      const cachedModel = this.modelCache.get(modelId);
+      cachedModel.lastUsed = new Date();
+      return cachedModel.model;
     }
-    this.loggingService.debug(`Cleared ${clearedCount} expired entries from model cache`, 'MlModelManagementService');
+
+    const modelData = await this.retrieveModel(modelId);
+    const model = await tf.loadLayersModel(tf.io.fromMemory(modelData.data));
+
+    this.modelCache.set(modelId, { model, lastUsed: new Date() });
+    this.cleanCache();
+
+    return model;
   }
 
-  startCacheCleanupInterval(): void {
-    setInterval(() => this.clearExpiredCache(), this.CACHE_EXPIRATION);
+  private cleanCache() {
+    const cacheSize = this.modelCache.size;
+    if (cacheSize > 10) {
+      const sortedCache = Array.from(this.modelCache.entries()).sort((a, b) => b[1].lastUsed.getTime() - a[1].lastUsed.getTime());
+      const modelsToRemove = sortedCache.slice(10);
+      modelsToRemove.forEach(([modelId]) => this.modelCache.delete(modelId));
+    }
+  }
+
+  async compareModelVersions(modelId1: string, modelId2: string): Promise<any> {
+    try {
+      const model1 = await this.retrieveModel(modelId1);
+      const model2 = await this.retrieveModel(modelId2);
+
+      const performanceHistory1 = await this.getModelPerformanceHistory(modelId1);
+      const performanceHistory2 = await this.getModelPerformanceHistory(modelId2);
+
+      const latestPerformance1 = performanceHistory1[0];
+      const latestPerformance2 = performanceHistory2[0];
+
+      return {
+        model1: {
+          id: model1.id,
+          name: model1.name,
+          version: model1.version,
+          createdAt: model1.created_at,
+          latestPerformance: latestPerformance1,
+        },
+        model2: {
+          id: model2.id,
+          name: model2.name,
+          version: model2.version,
+          createdAt: model2.created_at,
+          latestPerformance: latestPerformance2,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error comparing model versions: ${error.message}`);
+      throw new InternalServerErrorException('Failed to compare model versions');
+    }
   }
 }
