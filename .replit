@@ -73,7 +73,7 @@ task = "shell.exec"
 args = "npm run test src/resume-ingestion/resume-ingestion.service.spec.ts"
 
 [deployment]
-run = ["sh", "-c", "cd ai-recruitment-platform && npm run start:dev"]
+run = ["sh", "-c", "cd ai-recruitment-platform && npm run start:dev, ./start.sh"]
 
 [[ports]]
 localPort = 3000

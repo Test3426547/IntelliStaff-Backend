@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import { Button, BubblesBg } from '@/components/ui/inspiria'
+import { BubblesBg } from '@/components/ui/inspiria'
 
 gsap.registerPlugin(ScrollTrigger)
 

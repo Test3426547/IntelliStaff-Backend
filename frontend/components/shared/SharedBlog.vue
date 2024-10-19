@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import { Avatar, GlowBorder, confetti } from '@/components/ui/inspiria'
+import { GlowBorder, Confetti } from '@/components/ui/inspiria'
 import { useColorMode } from '@vueuse/core'
 
 gsap.registerPlugin(ScrollTrigger)

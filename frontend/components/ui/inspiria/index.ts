@@ -25,6 +25,8 @@ export { default as CardSpotlight } from './card-spotlight/CardSpotlight.vue'
 // Confetti
 export { default as ConfettiButton } from './confetti/ConfettiButton.vue'
 
+export { default as Confetti } from './confetti/Confetti.vue'
+
 // Container Scroll
 export { default as ContainerScroll } from './container-scroll/ContainerScroll.vue'
 export { default as ContainerScrollCard } from './container-scroll/ContainerScrollCard.vue'
