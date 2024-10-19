@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { gsap } from 'gsap'
-import { Globe, TextGenerateEffect, ShimmerButton } from '@/components/ui/inspiria'
+import { Globe, TextGenerateEffect } from '@/components/ui/inspiria'
+import ShimmerButton from '@/components/ui/inspiria/shimmer-button/ShimmerButton.vue' // Adjust the path as needed
 
 const headerRef = ref(null)
 
