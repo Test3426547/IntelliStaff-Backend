@@ -1,163 +1,328 @@
-import { Injectable } from '@nestjs/common';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DatabaseSetupService } from './database-setup';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
+import * as NodeCache from 'node-cache';
+import axios from 'axios';
 
 @Injectable()
-export class AnalyticsService {
+export class AnalyticsService extends HealthIndicator {
   private supabase: SupabaseClient;
+  private readonly logger = new Logger(AnalyticsService.name);
+  private cache: NodeCache;
+  private huggingfaceApiKey: string;
+  private huggingfaceInferenceEndpoint: string;
 
-  constructor(
-    private configService: ConfigService,
-    private databaseSetupService: DatabaseSetupService
-  ) {
+  constructor(private configService: ConfigService) {
+    super();
     this.supabase = createClient(
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
     );
+    this.cache = new NodeCache({ stdTTL: 600 }); // Cache for 10 minutes
+    this.huggingfaceApiKey = this.configService.get<string>('HUGGINGFACE_API_KEY');
+    this.huggingfaceInferenceEndpoint = this.configService.get<string>('HUGGINGFACE_INFERENCE_ENDPOINT');
   }
 
-  async setupDatabase() {
-    const sqlCommands = [
-      `
-      CREATE TABLE IF NOT EXISTS jobs (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        title TEXT NOT NULL,
-        company TEXT NOT NULL,
-        description TEXT NOT NULL,
-        requirements TEXT[] NOT NULL,
-        location TEXT NOT NULL,
-        salary TEXT,
-        postedDate TIMESTAMP WITH TIME ZONE NOT NULL,
-        lastRelistedDate TIMESTAMP WITH TIME ZONE
-      );
-
-      INSERT INTO jobs (title, company, description, requirements, location, salary, postedDate, lastRelistedDate)
-      VALUES
-        ('Software Engineer', 'TechCorp', 'Develop web applications', ARRAY['JavaScript', 'React', 'Node.js'], 'New York', '100000', NOW() - INTERVAL '20 days', NOW() - INTERVAL '5 days'),
-        ('Data Scientist', 'DataInc', 'Analyze large datasets', ARRAY['Python', 'Machine Learning', 'SQL'], 'San Francisco', '120000', NOW() - INTERVAL '35 days', NULL),
-        ('Product Manager', 'ProductCo', 'Lead product development', ARRAY['Agile', 'User Research', 'Strategy'], 'Chicago', '110000', NOW() - INTERVAL '15 days', NOW() - INTERVAL '2 days');
-      `,
-      `
-      CREATE TABLE IF NOT EXISTS processed_resumes (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        name TEXT NOT NULL,
-        email TEXT NOT NULL,
-        phone TEXT NOT NULL,
-        skills TEXT[] NOT NULL,
-        experience TEXT[] NOT NULL,
-        education TEXT[] NOT NULL
-      );
-
-      INSERT INTO processed_resumes (name, email, phone, skills, experience, education)
-      VALUES
-        ('John Doe', 'john@example.com', '1234567890', ARRAY['JavaScript', 'React', 'Node.js'], ARRAY['5 years at TechCorp'], ARRAY['BS Computer Science']),
-        ('Jane Smith', 'jane@example.com', '0987654321', ARRAY['Python', 'Machine Learning', 'SQL'], ARRAY['3 years at DataCo'], ARRAY['MS Data Science']),
-        ('Bob Johnson', 'bob@example.com', '1122334455', ARRAY['Agile', 'User Research', 'Product Strategy'], ARRAY['7 years at ProductInc'], ARRAY['MBA']);
-      `,
-      `
-      CREATE TABLE IF NOT EXISTS applicant_job_matches (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        applicant_id UUID REFERENCES processed_resumes(id),
-        job_id UUID REFERENCES jobs(id),
-        match_score FLOAT NOT NULL
-      );
-
-      INSERT INTO applicant_job_matches (applicant_id, job_id, match_score)
-      VALUES
-        ((SELECT id FROM processed_resumes WHERE name = 'John Doe'), (SELECT id FROM jobs WHERE title = 'Software Engineer'), 0.85),
-        ((SELECT id FROM processed_resumes WHERE name = 'Jane Smith'), (SELECT id FROM jobs WHERE title = 'Data Scientist'), 0.92),
-        ((SELECT id FROM processed_resumes WHERE name = 'Bob Johnson'), (SELECT id FROM jobs WHERE title = 'Product Manager'), 0.78);
-      `
-    ];
-
-    for (const sql of sqlCommands) {
-      const { error } = await this.supabase.rpc('exec', { sql });
-      if (error) {
-        console.error('Error executing SQL:', error);
-        throw error;
-      }
+  async checkHealth(): Promise<HealthIndicatorResult> {
+    try {
+      const { data, error } = await this.supabase.from('jobs').select('id').limit(1);
+      if (error) throw error;
+      return this.getStatus('analytics_service_db', true, { message: 'Analytics Service DB is healthy' });
+    } catch (error) {
+      this.logger.error(`Health check failed: ${error.message}`);
+      throw new HealthCheckError('Analytics Service DB check failed', error);
     }
-
-    console.log('Database setup completed successfully');
   }
 
-  async getJobPostingStats(): Promise<any> {
-    const { data, error } = await this.supabase
-      .from('jobs')
-      .select('id, title, postedDate, lastRelistedDate');
+  async getJobPostingStats(timeRange: string): Promise<any> {
+    const cacheKey = `jobPostingStats_${timeRange}`;
+    const cachedResult = this.cache.get(cacheKey);
+    if (cachedResult) return cachedResult;
 
-    if (error) throw new Error(`Failed to fetch job posting stats: ${error.message}`);
+    try {
+      const { data, error } = await this.supabase
+        .from('jobs')
+        .select('*')
+        .gte('created_at', this.getDateFromTimeRange(timeRange));
 
-    const totalJobs = data.length;
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
-    const recentJobs = data.filter(job => {
-      const postedDate = new Date(job.postedDate);
-      return postedDate >= thirtyDaysAgo;
-    }).length;
+      if (error) throw new Error(`Failed to fetch job posting stats: ${error.message}`);
 
-    const relistedJobs = data.filter(job => job.lastRelistedDate).length;
+      const stats = {
+        totalJobs: data.length,
+        activeJobs: data.filter(job => job.status === 'active').length,
+        averageSalary: this.calculateAverageSalary(data),
+        topCategories: this.getTopCategories(data),
+      };
 
-    return {
-      totalJobs,
-      recentJobs,
-      relistedJobs,
-    };
+      this.cache.set(cacheKey, stats);
+      return stats;
+    } catch (error) {
+      this.logger.error(`Error getting job posting stats: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get job posting stats');
+    }
   }
 
-  async getApplicantStats(): Promise<any> {
-    const { data, error } = await this.supabase
-      .from('processed_resumes')
-      .select('id, name, skills');
+  async getApplicantStats(timeRange: string): Promise<any> {
+    const cacheKey = `applicantStats_${timeRange}`;
+    const cachedResult = this.cache.get(cacheKey);
+    if (cachedResult) return cachedResult;
 
-    if (error) throw new Error(`Failed to fetch applicant stats: ${error.message}`);
+    try {
+      const { data, error } = await this.supabase
+        .from('applicants')
+        .select('*, resumes(*)')
+        .gte('created_at', this.getDateFromTimeRange(timeRange));
 
-    const totalApplicants = data.length;
-    const skillsCount = data.reduce((acc, applicant) => {
-      applicant.skills.forEach(skill => {
-        acc[skill] = (acc[skill] || 0) + 1;
-      });
+      if (error) throw new Error(`Failed to fetch applicant stats: ${error.message}`);
+
+      const stats = {
+        totalApplicants: data.length,
+        averageExperience: this.calculateAverageExperience(data),
+        topSkills: await this.getTopSkills(data),
+        educationDistribution: this.getEducationDistribution(data),
+      };
+
+      this.cache.set(cacheKey, stats);
+      return stats;
+    } catch (error) {
+      this.logger.error(`Error getting applicant stats: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get applicant stats');
+    }
+  }
+
+  async getMatchingInsights(timeRange: string): Promise<any> {
+    const cacheKey = `matchingInsights_${timeRange}`;
+    const cachedResult = this.cache.get(cacheKey);
+    if (cachedResult) return cachedResult;
+
+    try {
+      const { data, error } = await this.supabase
+        .from('applicant_matches')
+        .select('*, jobs(*), applicants(*)')
+        .gte('created_at', this.getDateFromTimeRange(timeRange));
+
+      if (error) throw new Error(`Failed to fetch matching insights: ${error.message}`);
+
+      const insights = {
+        totalMatches: data.length,
+        averageMatchScore: this.calculateAverageMatchScore(data),
+        topMatchingJobs: this.getTopMatchingJobs(data),
+        skillGapAnalysis: await this.performSkillGapAnalysis(data),
+      };
+
+      this.cache.set(cacheKey, insights);
+      return insights;
+    } catch (error) {
+      this.logger.error(`Error getting matching insights: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get matching insights');
+    }
+  }
+
+  async getRecruitmentFunnelAnalysis(timeRange: string): Promise<any> {
+    const cacheKey = `recruitmentFunnelAnalysis_${timeRange}`;
+    const cachedResult = this.cache.get(cacheKey);
+    if (cachedResult) return cachedResult;
+
+    try {
+      const jobsData = await this.supabase
+        .from('jobs')
+        .select('id, created_at')
+        .gte('created_at', this.getDateFromTimeRange(timeRange));
+
+      const applicantsData = await this.supabase
+        .from('applicants')
+        .select('id, created_at')
+        .gte('created_at', this.getDateFromTimeRange(timeRange));
+
+      const matchesData = await this.supabase
+        .from('applicant_matches')
+        .select('id, created_at')
+        .gte('created_at', this.getDateFromTimeRange(timeRange));
+
+      const hiresData = await this.supabase
+        .from('hires')
+        .select('id, created_at')
+        .gte('created_at', this.getDateFromTimeRange(timeRange));
+
+      if (jobsData.error || applicantsData.error || matchesData.error || hiresData.error) {
+        throw new Error('Failed to fetch recruitment funnel data');
+      }
+
+      const analysis = {
+        jobPostings: jobsData.data.length,
+        applicants: applicantsData.data.length,
+        matches: matchesData.data.length,
+        hires: hiresData.data.length,
+        conversionRates: {
+          applicantToMatch: (matchesData.data.length / applicantsData.data.length) * 100,
+          matchToHire: (hiresData.data.length / matchesData.data.length) * 100,
+          overallConversion: (hiresData.data.length / applicantsData.data.length) * 100,
+        },
+      };
+
+      this.cache.set(cacheKey, analysis);
+      return analysis;
+    } catch (error) {
+      this.logger.error(`Error getting recruitment funnel analysis: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get recruitment funnel analysis');
+    }
+  }
+
+  async getMarketTrendsAnalysis(): Promise<any> {
+    const cacheKey = 'marketTrendsAnalysis';
+    const cachedResult = this.cache.get(cacheKey);
+    if (cachedResult) return cachedResult;
+
+    try {
+      const prompt = `Analyze current job market trends based on the following data:
+        1. Top in-demand skills
+        2. Emerging job titles
+        3. Salary trends
+        4. Industry growth areas
+        
+        Provide a concise summary of the key trends and their implications for the job market.`;
+
+      const response = await axios.post(
+        this.huggingfaceInferenceEndpoint,
+        { inputs: prompt },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.huggingfaceApiKey}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const analysis = response.data[0].generated_text.trim();
+      this.cache.set(cacheKey, analysis, 86400); // Cache for 24 hours
+      return analysis;
+    } catch (error) {
+      this.logger.error(`Error getting market trends analysis: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get market trends analysis');
+    }
+  }
+
+  private getDateFromTimeRange(timeRange: string): Date {
+    const now = new Date();
+    switch (timeRange) {
+      case 'day':
+        return new Date(now.setDate(now.getDate() - 1));
+      case 'week':
+        return new Date(now.setDate(now.getDate() - 7));
+      case 'month':
+        return new Date(now.setMonth(now.getMonth() - 1));
+      case 'year':
+        return new Date(now.setFullYear(now.getFullYear() - 1));
+      default:
+        throw new Error('Invalid time range');
+    }
+  }
+
+  private calculateAverageSalary(jobs: any[]): number {
+    const salaries = jobs.filter(job => job.salary).map(job => job.salary);
+    return salaries.length > 0 ? salaries.reduce((a, b) => a + b) / salaries.length : 0;
+  }
+
+  private getTopCategories(jobs: any[]): { category: string, count: number }[] {
+    const categories = jobs.map(job => job.category);
+    const categoryCounts = categories.reduce((acc, category) => {
+      acc[category] = (acc[category] || 0) + 1;
       return acc;
     }, {});
-
-    const topSkills = Object.entries(skillsCount)
-      .sort((a, b) => (b[1] as number) - (a[1] as number))
-      .slice(0, 5)
-      .map(([skill, count]) => ({ skill, count }));
-
-    return {
-      totalApplicants,
-      topSkills,
-    };
-  }
-
-  async getMatchingInsights(): Promise<any> {
-    const { data: matches, error } = await this.supabase
-      .from('applicant_job_matches')
-      .select('applicant_id, job_id, match_score');
-
-    if (error) throw new Error(`Failed to fetch matching insights: ${error.message}`);
-
-    const totalMatches = matches.length;
-    const averageMatchScore = matches.reduce((sum, match) => sum + match.match_score, 0) / totalMatches;
-
-    const matchDistribution = matches.reduce((acc, match) => {
-      const scoreRange = Math.floor(match.match_score * 10) * 10;
-      acc[`${scoreRange}-${scoreRange + 9}`] = (acc[`${scoreRange}-${scoreRange + 9}`] || 0) + 1;
-      return acc;
-    }, {});
-
-    const topMatches = matches
-      .sort((a, b) => b.match_score - a.match_score)
+    return Object.entries(categoryCounts)
+      .map(([category, count]) => ({ category, count: count as number }))
+      .sort((a, b) => b.count - a.count)
       .slice(0, 5);
+  }
 
-    return {
-      totalMatches,
-      averageMatchScore,
-      matchDistribution,
-      topMatches,
-    };
+  private calculateAverageExperience(applicants: any[]): number {
+    const experiences = applicants.filter(applicant => applicant.years_of_experience).map(applicant => applicant.years_of_experience);
+    return experiences.length > 0 ? experiences.reduce((a, b) => a + b) / experiences.length : 0;
+  }
+
+  private async getTopSkills(applicants: any[]): Promise<{ skill: string, count: number }[]> {
+    const allSkills = applicants.flatMap(applicant => applicant.skills || []);
+    const skillCounts = allSkills.reduce((acc, skill) => {
+      acc[skill] = (acc[skill] || 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(skillCounts)
+      .map(([skill, count]) => ({ skill, count: count as number }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }
+
+  private getEducationDistribution(applicants: any[]): { level: string, count: number }[] {
+    const educationLevels = applicants.map(applicant => applicant.education_level);
+    const levelCounts = educationLevels.reduce((acc, level) => {
+      acc[level] = (acc[level] || 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(levelCounts)
+      .map(([level, count]) => ({ level, count: count as number }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  private calculateAverageMatchScore(matches: any[]): number {
+    const scores = matches.map(match => match.match_score);
+    return scores.length > 0 ? scores.reduce((a, b) => a + b) / scores.length : 0;
+  }
+
+  private getTopMatchingJobs(matches: any[]): { jobTitle: string, matchCount: number }[] {
+    const jobMatches = matches.reduce((acc, match) => {
+      const jobTitle = match.jobs.title;
+      acc[jobTitle] = (acc[jobTitle] || 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(jobMatches)
+      .map(([jobTitle, matchCount]) => ({ jobTitle, matchCount: matchCount as number }))
+      .sort((a, b) => b.matchCount - a.matchCount)
+      .slice(0, 5);
+  }
+
+  private async performSkillGapAnalysis(matches: any[]): Promise<any> {
+    const jobSkills = matches.flatMap(match => match.jobs.required_skills || []);
+    const applicantSkills = matches.flatMap(match => match.applicants.skills || []);
+
+    const missingSkills = jobSkills.filter(skill => !applicantSkills.includes(skill));
+    const skillGapCount = missingSkills.reduce((acc, skill) => {
+      acc[skill] = (acc[skill] || 0) + 1;
+      return acc;
+    }, {});
+
+    const topSkillGaps = Object.entries(skillGapCount)
+      .map(([skill, count]) => ({ skill, count: count as number }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const prompt = `Based on the following top skill gaps in job matches, provide recommendations for addressing these gaps:
+      ${topSkillGaps.map(gap => `${gap.skill}: ${gap.count} occurrences`).join('\n')}
+      
+      Provide concise recommendations for:
+      1. How job seekers can acquire these skills
+      2. How employers can adapt their job requirements or provide training
+      3. Potential partnerships or programs to bridge these skill gaps`;
+
+    try {
+      const response = await axios.post(
+        this.huggingfaceInferenceEndpoint,
+        { inputs: prompt },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.huggingfaceApiKey}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      return {
+        topSkillGaps,
+        recommendations: response.data[0].generated_text.trim(),
+      };
+    } catch (error) {
+      this.logger.error(`Error performing skill gap analysis: ${error.message}`);
+      return { topSkillGaps, recommendations: 'Unable to generate recommendations at this time.' };
+    }
   }
 }

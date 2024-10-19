@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsController } from './analytics.controller';
-import { DatabaseSetupService } from './database-setup';
+import { TerminusModule } from '@nestjs/terminus';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
-  providers: [AnalyticsService, DatabaseSetupService],
+  imports: [ConfigModule, TerminusModule, HttpModule],
+  providers: [AnalyticsService],
   controllers: [AnalyticsController],
   exports: [AnalyticsService],
 })
