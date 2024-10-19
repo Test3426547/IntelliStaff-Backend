@@ -7,14 +7,16 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
-import { NotificationService } from './notification.service';
 
-@WebSocketGateway()
+@WebSocketGateway({
+  cors: {
+    origin: '*',
+  },
+})
 export class NotificationGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
-  private logger: Logger = new Logger('NotificationGateway');
-
-  constructor(private readonly notificationService: NotificationService) {}
+  private readonly logger = new Logger(NotificationGateway.name);
+  private userSockets: Map<string, Socket> = new Map();
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
@@ -22,21 +24,24 @@ export class NotificationGateway implements OnGatewayConnection, OnGatewayDiscon
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+    for (const [userId, socket] of this.userSockets.entries()) {
+      if (socket === client) {
+        this.userSockets.delete(userId);
+        break;
+      }
+    }
   }
 
-  @SubscribeMessage('subscribe')
-  handleSubscribe(client: Socket, userId: string) {
-    client.join(userId);
-    this.logger.log(`Client ${client.id} subscribed to notifications for user ${userId}`);
+  @SubscribeMessage('register')
+  handleRegister(client: Socket, userId: string) {
+    this.userSockets.set(userId, client);
+    this.logger.log(`User ${userId} registered`);
   }
 
-  @SubscribeMessage('unsubscribe')
-  handleUnsubscribe(client: Socket, userId: string) {
-    client.leave(userId);
-    this.logger.log(`Client ${client.id} unsubscribed from notifications for user ${userId}`);
-  }
-
-  sendNotificationToUser(userId: string, message: string) {
-    this.server.to(userId).emit('notification', message);
+  sendNotificationToUser(userId: string, notification: any) {
+    const userSocket = this.userSockets.get(userId);
+    if (userSocket) {
+      userSocket.emit('notification', notification);
+    }
   }
 }

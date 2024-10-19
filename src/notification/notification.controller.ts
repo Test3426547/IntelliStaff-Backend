@@ -1,33 +1,44 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { NotificationService } from './notification.service';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '../user-management/auth.guard';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
-@ApiTags('notification')
-@Controller('notification')
+@ApiTags('notifications')
+@Controller('notifications')
 @UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
-  @Post('send')
-  @ApiOperation({ summary: 'Send a notification' })
-  @ApiResponse({ status: 200, description: 'Notification sent successfully' })
-  async sendNotification(
-    @Body('userId') userId: string,
-    @Body('message') message: string,
+  @Post()
+  @ApiOperation({ summary: 'Create a new notification' })
+  @ApiResponse({ status: 201, description: 'Notification created successfully' })
+  async createNotification(
+    @Body() notificationData: { userId: string; message: string; type: string }
   ) {
-    await this.notificationService.sendNotification(userId, message);
-    return { message: 'Notification sent successfully' };
+    return this.notificationService.createNotification(
+      notificationData.userId,
+      notificationData.message,
+      notificationData.type
+    );
   }
 
-  @Post('send-ai')
-  @ApiOperation({ summary: 'Send an AI-generated notification' })
-  @ApiResponse({ status: 200, description: 'AI-generated notification sent successfully' })
-  async sendAINotification(
-    @Body('userId') userId: string,
-    @Body('context') context: string,
+  @Get(':userId')
+  @ApiOperation({ summary: 'Get notifications for a user' })
+  @ApiResponse({ status: 200, description: 'Notifications retrieved successfully' })
+  async getNotifications(
+    @Param('userId') userId: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10
   ) {
-    await this.notificationService.sendAINotification(userId, context);
-    return { message: 'AI-generated notification sent successfully' };
+    return this.notificationService.getNotifications(userId, page, limit);
+  }
+
+  @Post(':id/read')
+  @ApiOperation({ summary: 'Mark a notification as read' })
+  @ApiResponse({ status: 200, description: 'Notification marked as read successfully' })
+  async markNotificationAsRead(@Param('id') id: string) {
+    await this.notificationService.markNotificationAsRead(id);
+    return { message: 'Notification marked as read successfully' };
   }
 }

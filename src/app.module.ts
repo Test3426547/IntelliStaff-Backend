@@ -8,6 +8,7 @@ import { CommunicationModule } from './communication/communication.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InvoicingBillingModule } from './invoicing-billing/invoicing-billing.module';
 import { MlModelManagementModule } from './ml-model-management/ml-model-management.module';
+import { NotificationModule } from './notification/notification.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { MlModelManagementModule } from './ml-model-management/ml-model-manageme
     AnalyticsModule,
     InvoicingBillingModule,
     MlModelManagementModule,
+    NotificationModule,
   ],
 })
 export class AppModule {}
