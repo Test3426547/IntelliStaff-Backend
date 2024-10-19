@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import axios from 'axios';
@@ -11,7 +11,8 @@ export class MlModelManagementService {
   private readonly logger = new Logger(MlModelManagementService.name);
   private huggingfaceApiKey: string;
   private huggingfaceInferenceEndpoint: string;
-  private modelCache: Map<string, any> = new Map();
+  private modelCache: Map<string, { model: any; expiration: number }> = new Map();
+  private readonly CACHE_EXPIRATION = 3600000; // 1 hour in milliseconds
 
   constructor(private configService: ConfigService) {
     this.supabase = createClient(
@@ -23,63 +24,102 @@ export class MlModelManagementService {
   }
 
   async getModel(modelName: string, version?: string): Promise<any> {
-    const cacheKey = `${modelName}:${version || 'latest'}`;
-    if (this.modelCache.has(cacheKey)) {
-      return this.modelCache.get(cacheKey);
+    try {
+      const cacheKey = `${modelName}:${version || 'latest'}`;
+      const cachedModel = this.modelCache.get(cacheKey);
+
+      if (cachedModel && cachedModel.expiration > Date.now()) {
+        this.logger.debug(`Cache hit for model: ${modelName}, version: ${version || 'latest'}`);
+        return cachedModel.model;
+      }
+
+      const { data, error } = await this.supabase
+        .from('ml_models')
+        .select('*')
+        .eq('name', modelName)
+        .order('version', { ascending: false })
+        .limit(1);
+
+      if (error) throw new InternalServerErrorException(`Failed to fetch model: ${error.message}`);
+      if (data.length === 0) throw new NotFoundException(`Model ${modelName} not found`);
+
+      const model = data[0];
+      this.modelCache.set(cacheKey, { model, expiration: Date.now() + this.CACHE_EXPIRATION });
+      return model;
+    } catch (error) {
+      this.logger.error(`Error in getModel: ${error.message}`);
+      throw error;
     }
-
-    const { data, error } = await this.supabase
-      .from('ml_models')
-      .select('*')
-      .eq('name', modelName)
-      .order('version', { ascending: false })
-      .limit(1);
-
-    if (error) throw new Error(`Failed to fetch model: ${error.message}`);
-    if (data.length === 0) throw new Error(`Model ${modelName} not found`);
-
-    const model = data[0];
-    this.modelCache.set(cacheKey, model);
-    return model;
   }
 
-  async updateModel(modelName: string, modelData: any): Promise<void> {
-    const version = uuidv4();
-    const { error } = await this.supabase
-      .from('ml_models')
-      .insert({ name: modelName, version, data: modelData });
+  async updateModel(modelName: string, modelData: any, metadata: any): Promise<void> {
+    try {
+      if (!modelName || !modelData) {
+        throw new BadRequestException('Model name and data are required');
+      }
 
-    if (error) throw new Error(`Failed to update model: ${error.message}`);
-    this.modelCache.clear(); // Clear cache on update
+      const version = this.generateVersion();
+      const { error } = await this.supabase
+        .from('ml_models')
+        .insert({
+          name: modelName,
+          version,
+          data: modelData,
+          metadata,
+          created_at: new Date().toISOString(),
+          status: 'active',
+        });
+
+      if (error) throw new InternalServerErrorException(`Failed to update model: ${error.message}`);
+      
+      this.modelCache.clear(); // Clear cache on update
+      await this.logModelLifecycleEvent(modelName, version, 'created');
+      await this.logModelUpdate(modelName, version, 'Model updated');
+      this.logger.log(`Model ${modelName} updated successfully with version ${version}`);
+    } catch (error) {
+      this.logger.error(`Error in updateModel: ${error.message}`);
+      throw error;
+    }
   }
 
-  async listModels(): Promise<any[]> {
-    const { data, error } = await this.supabase
-      .from('ml_models')
-      .select('name, version')
-      .order('name', { ascending: true })
-      .order('version', { ascending: false });
+  async getAllModelVersions(modelName: string): Promise<any[]> {
+    try {
+      const { data, error } = await this.supabase
+        .from('ml_models')
+        .select('*')
+        .eq('name', modelName)
+        .order('version', { ascending: false });
 
-    if (error) throw new Error(`Failed to list models: ${error.message}`);
-    return data;
+      if (error) throw new InternalServerErrorException(`Failed to fetch model versions: ${error.message}`);
+      if (data.length === 0) throw new NotFoundException(`Model ${modelName} not found`);
+
+      return data;
+    } catch (error) {
+      this.logger.error(`Error in getAllModelVersions: ${error.message}`);
+      throw error;
+    }
   }
 
-  async getModelPerformance(modelName: string, version?: string): Promise<any> {
-    const model = await this.getModel(modelName, version);
-    const { data, error } = await this.supabase
-      .from('model_performance')
-      .select('*')
-      .eq('model_id', model.id)
-      .order('timestamp', { ascending: false })
-      .limit(1);
+  async trackModelPerformance(modelName: string, version: string, metrics: any): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('model_performance')
+        .insert({
+          model_name: modelName,
+          version,
+          metrics,
+          timestamp: new Date().toISOString(),
+        });
 
-    if (error) throw new Error(`Failed to fetch model performance: ${error.message}`);
-    return data[0] || null;
+      if (error) throw new InternalServerErrorException(`Failed to track model performance: ${error.message}`);
+      this.logger.log(`Performance metrics tracked for model ${modelName} version ${version}`);
+    } catch (error) {
+      this.logger.error(`Error in trackModelPerformance: ${error.message}`);
+      throw error;
+    }
   }
 
-  async runInference(modelName: string, inputData: any): Promise<any> {
-    const model = await this.getModel(modelName);
-    
+  async runHuggingFaceInference(modelName: string, inputData: any): Promise<any> {
     try {
       const response = await axios.post(
         this.huggingfaceInferenceEndpoint,
@@ -92,66 +132,118 @@ export class MlModelManagementService {
         }
       );
 
-      await this.logInference(model.id, inputData, response.data);
       return response.data;
     } catch (error) {
-      this.logger.error(`Error running inference: ${error.message}`);
-      throw new Error('Failed to run inference');
+      this.logger.error(`Error in runHuggingFaceInference: ${error.message}`);
+      throw new InternalServerErrorException('Failed to run inference using HuggingFace API');
     }
   }
 
-  private async logInference(modelId: string, input: any, output: any): Promise<void> {
-    const { error } = await this.supabase
-      .from('model_inferences')
-      .insert({ model_id: modelId, input, output, timestamp: new Date().toISOString() });
+  async compareModelVersions(modelName: string, versions: string[]): Promise<any> {
+    try {
+      const performanceData = await Promise.all(versions.map(async (version) => {
+        const { data, error } = await this.supabase
+          .from('model_performance')
+          .select('*')
+          .eq('model_name', modelName)
+          .eq('version', version)
+          .order('timestamp', { ascending: false })
+          .limit(1);
 
-    if (error) this.logger.error(`Failed to log inference: ${error.message}`);
+        if (error) throw new InternalServerErrorException(`Failed to fetch performance data: ${error.message}`);
+        return { version, performance: data[0] };
+      }));
+
+      return performanceData;
+    } catch (error) {
+      this.logger.error(`Error in compareModelVersions: ${error.message}`);
+      throw error;
+    }
   }
 
-  async compareModelVersions(modelName: string, version1: string, version2: string): Promise<any> {
-    const model1 = await this.getModel(modelName, version1);
-    const model2 = await this.getModel(modelName, version2);
-    const perf1 = await this.getModelPerformance(modelName, version1);
-    const perf2 = await this.getModelPerformance(modelName, version2);
+  async rollbackModel(modelName: string, version: string): Promise<void> {
+    try {
+      const { data, error } = await this.supabase
+        .from('ml_models')
+        .select('*')
+        .eq('name', modelName)
+        .eq('version', version)
+        .single();
 
-    return {
-      version1: { model: model1, performance: perf1 },
-      version2: { model: model2, performance: perf2 },
-    };
+      if (error) throw new NotFoundException(`Model version not found: ${error.message}`);
+
+      const newVersion = this.generateVersion();
+      const { error: insertError } = await this.supabase
+        .from('ml_models')
+        .insert({
+          ...data,
+          version: newVersion,
+          created_at: new Date().toISOString(),
+          status: 'active',
+        });
+
+      if (insertError) throw new InternalServerErrorException(`Failed to rollback model: ${insertError.message}`);
+
+      this.modelCache.clear(); // Clear cache on rollback
+      await this.logModelLifecycleEvent(modelName, newVersion, 'rolled back');
+      this.logger.log(`Model ${modelName} rolled back to version ${version} with new version ${newVersion}`);
+    } catch (error) {
+      this.logger.error(`Error in rollbackModel: ${error.message}`);
+      throw error;
+    }
   }
 
-  async runABTest(modelName: string, version1: string, version2: string, testData: any[]): Promise<any> {
-    const results1 = await Promise.all(testData.map(data => this.runInference(modelName, data)));
-    const results2 = await Promise.all(testData.map(data => this.runInference(modelName, data)));
-
-    // Implement your A/B test evaluation logic here
-    // This is a simplified example
-    const accuracy1 = this.calculateAccuracy(results1, testData);
-    const accuracy2 = this.calculateAccuracy(results2, testData);
-
-    return {
-      version1: { accuracy: accuracy1 },
-      version2: { accuracy: accuracy2 },
-    };
+  private generateVersion(): string {
+    return `${new Date().toISOString().replace(/[-:T.]/g, '')}_${uuidv4().substr(0, 8)}`;
   }
 
-  private calculateAccuracy(results: any[], testData: any[]): number {
-    // Implement your accuracy calculation logic here
-    // This is a placeholder implementation
-    return Math.random(); // Replace with actual accuracy calculation
+  private async logModelLifecycleEvent(modelName: string, version: string, event: string): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('model_lifecycle_events')
+        .insert({
+          model_name: modelName,
+          version,
+          event,
+          timestamp: new Date().toISOString(),
+        });
+
+      if (error) throw new Error(`Failed to log model lifecycle event: ${error.message}`);
+    } catch (error) {
+      this.logger.error(`Error in logModelLifecycleEvent: ${error.message}`);
+    }
   }
 
-  async exportModel(modelName: string, version?: string): Promise<ArrayBuffer> {
-    const model = await this.getModel(modelName, version);
-    const tensorflowModel = await tf.loadLayersModel(`file://${model.data.modelPath}`);
-    return await tensorflowModel.save(tf.io.withSaveHandler(async (artifacts) => {
-      return artifacts;
-    }));
+  private async logModelUpdate(modelName: string, version: string, description: string): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('model_updates')
+        .insert({
+          model_name: modelName,
+          version,
+          description,
+          timestamp: new Date().toISOString(),
+        });
+
+      if (error) throw new Error(`Failed to log model update: ${error.message}`);
+    } catch (error) {
+      this.logger.error(`Error in logModelUpdate: ${error.message}`);
+    }
   }
 
-  async importModel(modelName: string, modelBuffer: ArrayBuffer): Promise<void> {
-    const modelPath = `/tmp/${modelName}_${Date.now()}.json`;
-    await tf.io.saveModel(tf.io.fromMemory(modelBuffer), `file://${modelPath}`);
-    await this.updateModel(modelName, { modelPath });
+  clearExpiredCache(): void {
+    const now = Date.now();
+    let clearedCount = 0;
+    for (const [key, value] of this.modelCache.entries()) {
+      if (value.expiration <= now) {
+        this.modelCache.delete(key);
+        clearedCount++;
+      }
+    }
+    this.logger.debug(`Cleared ${clearedCount} expired entries from model cache`);
+  }
+
+  startCacheCleanupInterval(): void {
+    setInterval(() => this.clearExpiredCache(), this.CACHE_EXPIRATION);
   }
 }

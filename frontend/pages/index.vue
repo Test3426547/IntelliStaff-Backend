@@ -1,6 +1,6 @@
 <script setup>
 import { useAsyncData } from '#app'
-import HomeHero from '@/components/views/home/HomeHero.vue'
+import HomeHeader from '@/components/views/home/HomeHeader.vue'
 import HomeLogos from '@/components/views/home/HomeLogos.vue'
 import HomeFeature from '@/components/views/home/HomeFeature.vue'
 import SharedBlog from '@/components/shared/SharedBlog.vue'
@@ -9,7 +9,7 @@ import SharedContactForm from '@/components/shared/SharedContactForm.vue'
 import SharedFAQ from '@/components/shared/SharedFAQ.vue'
 
 // Fetch all necessary content
-const { data: heroContent } = await useAsyncData('heroContent', () => queryContent('/home/hero').findOne())
+const { data: headerContent } = await useAsyncData('headerContent', () => queryContent('/home/header').findOne())
 const { data: logosContent } = await useAsyncData('logosContent', () => queryContent('/home/logos').findOne())
 const { data: featureContent } = await useAsyncData('featureContent', () => queryContent('/home/feature').findOne())
 const { data: blogContent } = await useAsyncData('blogContent', () => queryContent('/shared/blog').findOne())
@@ -20,7 +20,7 @@ const { data: faqContent } = await useAsyncData('faqContent', () => queryContent
 
 <template>
   <main>
-    <HomeHero v-if="heroContent" :content="heroContent" />
+    <HomeHeader v-if="headerContent" :content="headerContent" />
     <HomeLogos v-if="logosContent" :content="logosContent" />
     <HomeFeature v-if="featureContent" :content="featureContent" />
     <SharedBlog v-if="blogContent" :content="blogContent" />

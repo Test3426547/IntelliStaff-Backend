@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseInterceptors, UploadedFile, BadRequestException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { MlModelManagementService } from './ml-model-management.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -11,92 +11,126 @@ export class MlModelManagementController {
   @Get('models/:modelName')
   @ApiOperation({ summary: 'Get a specific model' })
   @ApiResponse({ status: 200, description: 'Returns the requested model' })
+  @ApiResponse({ status: 404, description: 'Model not found' })
   @ApiParam({ name: 'modelName', type: 'string' })
   @ApiQuery({ name: 'version', required: false, type: 'string' })
   async getModel(@Param('modelName') modelName: string, @Query('version') version?: string) {
-    return this.mlModelManagementService.getModel(modelName, version);
+    try {
+      return await this.mlModelManagementService.getModel(modelName, version);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to retrieve model');
+    }
   }
 
   @Post('models/update')
   @ApiOperation({ summary: 'Update a model' })
   @ApiResponse({ status: 200, description: 'Model updated successfully' })
-  @ApiBody({ schema: { type: 'object', properties: { modelName: { type: 'string' }, modelData: { type: 'object' } } } })
-  async updateModel(@Body('modelName') modelName: string, @Body('modelData') modelData: any) {
-    await this.mlModelManagementService.updateModel(modelName, modelData);
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiBody({ schema: { type: 'object', properties: { modelName: { type: 'string' }, modelData: { type: 'object' }, metadata: { type: 'object' } } } })
+  async updateModel(
+    @Body('modelName') modelName: string,
+    @Body('modelData') modelData: any,
+    @Body('metadata') metadata: any
+  ) {
+    if (!modelName || !modelData) {
+      throw new BadRequestException('Model name and data are required');
+    }
+    await this.mlModelManagementService.updateModel(modelName, modelData, metadata);
     return { message: 'Model updated successfully' };
   }
 
-  @Get('models')
-  @ApiOperation({ summary: 'List all available models' })
-  @ApiResponse({ status: 200, description: 'Returns a list of all available models' })
-  async listModels() {
-    return this.mlModelManagementService.listModels();
+  @Get('models/:modelName/versions')
+  @ApiOperation({ summary: 'Get all versions of a model' })
+  @ApiResponse({ status: 200, description: 'Returns all versions of the specified model' })
+  @ApiResponse({ status: 404, description: 'Model not found' })
+  @ApiParam({ name: 'modelName', type: 'string' })
+  async getAllModelVersions(@Param('modelName') modelName: string) {
+    try {
+      return await this.mlModelManagementService.getAllModelVersions(modelName);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to retrieve model versions');
+    }
   }
 
-  @Get('models/:modelName/performance')
-  @ApiOperation({ summary: 'Get model performance metrics' })
-  @ApiResponse({ status: 200, description: 'Returns performance metrics for the specified model' })
+  @Post('models/:modelName/performance')
+  @ApiOperation({ summary: 'Track model performance' })
+  @ApiResponse({ status: 200, description: 'Performance metrics tracked successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
   @ApiParam({ name: 'modelName', type: 'string' })
-  @ApiQuery({ name: 'version', required: false, type: 'string' })
-  async getModelPerformance(@Param('modelName') modelName: string, @Query('version') version?: string) {
-    return this.mlModelManagementService.getModelPerformance(modelName, version);
+  @ApiBody({ schema: { type: 'object', properties: { version: { type: 'string' }, metrics: { type: 'object' } } } })
+  async trackModelPerformance(
+    @Param('modelName') modelName: string,
+    @Body('version') version: string,
+    @Body('metrics') metrics: any
+  ) {
+    if (!version || !metrics) {
+      throw new BadRequestException('Version and metrics are required');
+    }
+    await this.mlModelManagementService.trackModelPerformance(modelName, version, metrics);
+    return { message: 'Performance metrics tracked successfully' };
   }
 
   @Post('models/:modelName/inference')
-  @ApiOperation({ summary: 'Run inference on a model' })
-  @ApiResponse({ status: 200, description: 'Returns the inference result' })
+  @ApiOperation({ summary: 'Run HuggingFace inference' })
+  @ApiResponse({ status: 200, description: 'Inference completed successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
   @ApiParam({ name: 'modelName', type: 'string' })
   @ApiBody({ schema: { type: 'object', properties: { inputData: { type: 'object' } } } })
-  async runInference(@Param('modelName') modelName: string, @Body('inputData') inputData: any) {
-    return this.mlModelManagementService.runInference(modelName, inputData);
+  async runHuggingFaceInference(
+    @Param('modelName') modelName: string,
+    @Body('inputData') inputData: any
+  ) {
+    if (!inputData) {
+      throw new BadRequestException('Input data is required');
+    }
+    return await this.mlModelManagementService.runHuggingFaceInference(modelName, inputData);
   }
 
-  @Get('models/:modelName/compare')
-  @ApiOperation({ summary: 'Compare two versions of a model' })
-  @ApiResponse({ status: 200, description: 'Returns a comparison of the two model versions' })
+  @Post('models/:modelName/compare')
+  @ApiOperation({ summary: 'Compare model versions' })
+  @ApiResponse({ status: 200, description: 'Model versions compared successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
   @ApiParam({ name: 'modelName', type: 'string' })
-  @ApiQuery({ name: 'version1', required: true, type: 'string' })
-  @ApiQuery({ name: 'version2', required: true, type: 'string' })
+  @ApiBody({ schema: { type: 'object', properties: { versions: { type: 'array', items: { type: 'string' } } } } })
   async compareModelVersions(
     @Param('modelName') modelName: string,
-    @Query('version1') version1: string,
-    @Query('version2') version2: string,
+    @Body('versions') versions: string[]
   ) {
-    return this.mlModelManagementService.compareModelVersions(modelName, version1, version2);
+    if (!versions || versions.length < 2) {
+      throw new BadRequestException('At least two versions are required for comparison');
+    }
+    return await this.mlModelManagementService.compareModelVersions(modelName, versions);
   }
 
-  @Post('models/:modelName/abtest')
-  @ApiOperation({ summary: 'Run A/B test on two versions of a model' })
-  @ApiResponse({ status: 200, description: 'Returns the results of the A/B test' })
+  @Post('models/:modelName/rollback')
+  @ApiOperation({ summary: 'Rollback a model to a previous version' })
+  @ApiResponse({ status: 200, description: 'Model rolled back successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 404, description: 'Model or version not found' })
   @ApiParam({ name: 'modelName', type: 'string' })
-  @ApiQuery({ name: 'version1', required: true, type: 'string' })
-  @ApiQuery({ name: 'version2', required: true, type: 'string' })
-  @ApiBody({ schema: { type: 'object', properties: { testData: { type: 'array', items: { type: 'object' } } } } })
-  async runABTest(
+  @ApiBody({ schema: { type: 'object', properties: { version: { type: 'string' } } } })
+  async rollbackModel(
     @Param('modelName') modelName: string,
-    @Query('version1') version1: string,
-    @Query('version2') version2: string,
-    @Body('testData') testData: any[],
+    @Body('version') version: string
   ) {
-    return this.mlModelManagementService.runABTest(modelName, version1, version2, testData);
+    if (!version) {
+      throw new BadRequestException('Version is required for rollback');
+    }
+    await this.mlModelManagementService.rollbackModel(modelName, version);
+    return { message: 'Model rolled back successfully' };
   }
 
-  @Get('models/:modelName/export')
-  @ApiOperation({ summary: 'Export a model' })
-  @ApiResponse({ status: 200, description: 'Returns the exported model as a file' })
-  @ApiParam({ name: 'modelName', type: 'string' })
-  @ApiQuery({ name: 'version', required: false, type: 'string' })
-  async exportModel(@Param('modelName') modelName: string, @Query('version') version?: string) {
-    return this.mlModelManagementService.exportModel(modelName, version);
-  }
-
-  @Post('models/:modelName/import')
-  @ApiOperation({ summary: 'Import a model' })
-  @ApiResponse({ status: 200, description: 'Model imported successfully' })
-  @ApiParam({ name: 'modelName', type: 'string' })
-  @UseInterceptors(FileInterceptor('file'))
-  async importModel(@Param('modelName') modelName: string, @UploadedFile() file: Express.Multer.File) {
-    await this.mlModelManagementService.importModel(modelName, file.buffer);
-    return { message: 'Model imported successfully' };
+  @Post('cache/cleanup')
+  @ApiOperation({ summary: 'Manually trigger cache cleanup' })
+  @ApiResponse({ status: 200, description: 'Cache cleanup triggered successfully' })
+  async triggerCacheCleanup() {
+    this.mlModelManagementService.clearExpiredCache();
+    return { message: 'Cache cleanup triggered successfully' };
   }
 }

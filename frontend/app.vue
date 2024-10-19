@@ -8,7 +8,7 @@
 </template>
 
 <script setup lang="ts">
-import { useHead } from '#head'
+import { useHead } from '#app'
 
 // Global head meta
 useHead({

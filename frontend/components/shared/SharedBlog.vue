@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import confetti from 'canvas-confetti'
-import { Avatar, GlowBorder } from '@/components/ui/inspiria'
+import { Avatar, GlowBorder, confetti } from '@/components/ui/inspiria'
 import { useColorMode } from '@vueuse/core'
 
 gsap.registerPlugin(ScrollTrigger)
@@ -58,26 +57,11 @@ const triggerFireworks = () => {
   }, 250)
 }
 
-const Meteors = () => {
-  return (
-    <div class="absolute inset-0 overflow-hidden">
-      {[...Array(20)].map((_, i) => (
-        <span
-          key={i}
-          class={`absolute top-1/2 left-1/2 h-0.5 w-0.5 rotate-[215deg] animate-meteor rounded-[9999px] bg-slate-500 shadow-[0_0_0_1px_#ffffff10] ${
-            isDark.value ? '' : 'invert'
-          }`}
-          style={{
-            top: '0px',
-            left: `${Math.floor(Math.random() * (400 - -400) + -400)}px`,
-            animationDelay: `${Math.random() * (0.8 - 0.2) + 0.2}s`,
-            animationDuration: `${Math.floor(Math.random() * (10 - 2) + 2)}s`,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
+const meteors = computed(() => Array(20).fill(null).map(() => ({
+  left: `${Math.floor(Math.random() * (400 - -400) + -400)}px`,
+  animationDelay: `${Math.random() * (0.8 - 0.2) + 0.2}s`,
+  animationDuration: `${Math.floor(Math.random() * (10 - 2) + 2)}s`,
+})))
 </script>
 
 <template>
@@ -95,7 +79,20 @@ const Meteors = () => {
       >
         <div class="relative w-full h-60 lg:h-40">
           <NuxtImg :src="item.cover" :alt="item.title" class="block w-full h-full object-cover" />
-          <Meteors />
+          <div class="absolute inset-0 overflow-hidden">
+            <span
+              v-for="(meteor, i) in meteors"
+              :key="i"
+              class="absolute top-1/2 left-1/2 h-0.5 w-0.5 rotate-[215deg] animate-meteor rounded-[9999px] bg-slate-500 shadow-[0_0_0_1px_#ffffff10]"
+              :class="{ 'invert': !isDark }"
+              :style="{
+                top: '0px',
+                left: meteor.left,
+                animationDelay: meteor.animationDelay,
+                animationDuration: meteor.animationDuration,
+              }"
+            />
+          </div>
         </div>
         <div class="p-6">
           <span

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useHead } from '#head'
+import { useHead } from '#app'
 import { useRoute } from 'vue-router'
 import { ref, onMounted, computed } from 'vue'
 
