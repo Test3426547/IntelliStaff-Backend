@@ -1,94 +1,151 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import * as amqp from 'amqplib';
-import * as https from 'https';
+import { JobProcessingService } from './job-processing.service';
+const { scrapeLinkedInJob, scrapeLinkedInJobs, scrapeLinkedInCompany } = require('./linkedin-scraper');
 
 @Injectable()
 export class JobIngestionService {
   private supabase: SupabaseClient;
   private readonly logger = new Logger(JobIngestionService.name);
-  private rabbitmqConnection: amqp.Connection;
-  private rabbitmqChannel: amqp.Channel;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private jobProcessingService: JobProcessingService
+  ) {
     this.supabase = createClient(
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
     );
-    this.initializeRabbitMQ();
   }
 
-  private async initializeRabbitMQ() {
+  async ingestJob(url: string): Promise<any> {
     try {
-      this.rabbitmqConnection = await amqp.connect(this.configService.get<string>('RABBITMQ_URL'));
-      this.rabbitmqChannel = await this.rabbitmqConnection.createChannel();
-      await this.rabbitmqChannel.assertQueue('job_ingestion', { durable: true });
-      this.logger.log('RabbitMQ connection established');
-    } catch (error) {
-      this.logger.error(`Failed to connect to RabbitMQ: ${error.message}`);
-    }
-  }
+      const jobData = await scrapeLinkedInJob(url);
+      
+      const { data, error } = await this.supabase
+        .from('jobs')
+        .insert({
+          title: jobData.title,
+          company: jobData.company,
+          location: jobData.location,
+          description: jobData.description,
+          posted_date: jobData.postedDate,
+          job_type: jobData.jobType,
+          applicants: jobData.applicants,
+          salary: jobData.salary,
+          skills: jobData.skills,
+          source_url: url,
+        })
+        .single();
 
-  async ingestJob(jobData: any) {
-    try {
-      const { data, error } = await this.supabase.from('jobs').insert(jobData);
-      if (error) throw new Error(`Failed to ingest job: ${error.message}`);
-      
-      await this.rabbitmqChannel.sendToQueue('job_ingestion', Buffer.from(JSON.stringify(data)));
-      this.logger.log(`Job ingested and sent to queue: ${data[0].id}`);
-      
-      return data[0];
+      if (error) throw new Error(`Failed to insert job: ${error.message}`);
+
+      // Trigger job processing
+      await this.jobProcessingService.processJob(data.id);
+
+      return data;
     } catch (error) {
       this.logger.error(`Error ingesting job: ${error.message}`);
       throw error;
     }
   }
 
-  async scrapeJobsFromWebsite(url: string) {
-    return new Promise((resolve, reject) => {
-      https.get(url, (res) => {
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        res.on('end', async () => {
-          try {
-            // Simple extraction of job titles (this should be replaced with proper parsing)
-            const jobTitles = data.match(/<h2>(.*?)<\/h2>/g) || [];
-            const jobs = jobTitles.map(title => ({
-              title: title.replace(/<\/?h2>/g, ''),
-              source_url: url
-            }));
-            
-            for (const job of jobs) {
-              await this.ingestJob(job);
-            }
-            
-            resolve(jobs);
-          } catch (error) {
-            reject(error);
+  async ingestMultipleJobs(searchUrl: string, limit: number = 10): Promise<any[]> {
+    try {
+      const jobs = await scrapeLinkedInJobs(searchUrl, limit);
+      const insertedJobs = [];
+
+      for (const job of jobs) {
+        try {
+          const { data, error } = await this.supabase
+            .from('jobs')
+            .insert({
+              title: job.title,
+              company: job.company,
+              location: job.location,
+              description: job.description,
+              posted_date: job.postedDate,
+              job_type: job.jobType,
+              applicants: job.applicants,
+              salary: job.salary,
+              skills: job.skills,
+              source_url: job.url,
+            })
+            .single();
+
+          if (error) {
+            this.logger.error(`Failed to insert job: ${error.message}`);
+            continue;
           }
-        });
-      }).on('error', (error) => {
-        reject(error);
-      });
-    });
+
+          insertedJobs.push(data);
+          await this.jobProcessingService.processJob(data.id);
+        } catch (error) {
+          this.logger.error(`Error processing job: ${error.message}`);
+        }
+      }
+
+      return insertedJobs;
+    } catch (error) {
+      this.logger.error(`Error ingesting multiple jobs: ${error.message}`);
+      throw error;
+    }
   }
 
-  async processJobQueue() {
+  async ingestCompany(url: string): Promise<any> {
     try {
-      await this.rabbitmqChannel.consume('job_ingestion', async (msg) => {
-        if (msg !== null) {
-          const jobData = JSON.parse(msg.content.toString());
-          // Process the job data (e.g., enrich, validate, etc.)
-          this.logger.log(`Processing job: ${jobData.id}`);
-          // Acknowledge the message
-          this.rabbitmqChannel.ack(msg);
-        }
-      });
+      const companyData = await scrapeLinkedInCompany(url);
+      
+      const { data, error } = await this.supabase
+        .from('companies')
+        .insert({
+          name: companyData.name,
+          industry: companyData.industry,
+          employee_count: companyData.employeeCount,
+          description: companyData.description,
+          source_url: companyData.url,
+        })
+        .single();
+
+      if (error) throw new Error(`Failed to insert company: ${error.message}`);
+
+      return data;
     } catch (error) {
-      this.logger.error(`Error processing job queue: ${error.message}`);
+      this.logger.error(`Error ingesting company: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async getJobs(page: number = 1, limit: number = 10): Promise<{ jobs: any[], total: number }> {
+    try {
+      const { data, error, count } = await this.supabase
+        .from('jobs')
+        .select('*', { count: 'exact' })
+        .range((page - 1) * limit, page * limit - 1);
+
+      if (error) throw new Error(`Failed to fetch jobs: ${error.message}`);
+
+      return { jobs: data, total: count };
+    } catch (error) {
+      this.logger.error(`Error fetching jobs: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async getCompanies(page: number = 1, limit: number = 10): Promise<{ companies: any[], total: number }> {
+    try {
+      const { data, error, count } = await this.supabase
+        .from('companies')
+        .select('*', { count: 'exact' })
+        .range((page - 1) * limit, page * limit - 1);
+
+      if (error) throw new Error(`Failed to fetch companies: ${error.message}`);
+
+      return { companies: data, total: count };
+    } catch (error) {
+      this.logger.error(`Error fetching companies: ${error.message}`);
+      throw error;
     }
   }
 }
