@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import axios from 'axios';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class ErrorHandlingMonitoringService {
@@ -19,18 +20,21 @@ export class ErrorHandlingMonitoringService {
     this.huggingfaceInferenceEndpoint = this.configService.get<string>('HUGGINGFACE_INFERENCE_ENDPOINT');
   }
 
-  async logError(error: Error, context: string): Promise<void> {
+  async logError(error: Error, context: string, userId?: string): Promise<void> {
     try {
+      const errorId = crypto.randomUUID();
       const { error: supabaseError } = await this.supabase.from('error_logs').insert({
+        id: errorId,
         error_message: error.message,
         stack_trace: error.stack,
         context,
+        user_id: userId,
         timestamp: new Date().toISOString(),
       });
 
       if (supabaseError) throw new Error(`Failed to log error: ${supabaseError.message}`);
 
-      this.logger.error(`Error logged: ${error.message} in context: ${context}`);
+      this.logger.error(`Error logged: ${errorId} - ${error.message} in context: ${context}`);
     } catch (loggingError) {
       this.logger.error(`Error while logging error: ${loggingError.message}`);
     }
@@ -71,6 +75,7 @@ export class ErrorHandlingMonitoringService {
         2. Potential root causes
         3. Recommendations for error prevention
         4. Suggestions for improving system reliability
+        5. Any potential security concerns or vulnerabilities
       `;
 
       const response = await axios.post(

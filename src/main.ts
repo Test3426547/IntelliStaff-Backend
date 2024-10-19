@@ -10,6 +10,10 @@ import { ConfigService } from '@nestjs/config';
 import { AuditLoggingService } from './audit-logging/audit-logging.service';
 import { LoggingMiddleware } from './common/middleware/logging.middleware';
 import { SentryService } from './common/services/sentry.service';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import * as csurf from 'csurf';
+import * as hpp from 'hpp';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -38,8 +42,39 @@ async function bootstrap() {
   // Apply global filters
   app.useGlobalFilters(new GlobalExceptionFilter(auditLoggingService, sentryService));
 
-  // Use Helmet for security headers
-  app.use(helmet());
+  // Use Helmet for security headers with CSP
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https://api.example.com"], // Add your API domains
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    },
+    referrerPolicy: {
+      policy: 'strict-origin-when-cross-origin',
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+  }));
+
+  // Set additional security headers
+  app.use((req, res, next) => {
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    next();
+  });
 
   // Use compression for responses
   app.use(compression());
@@ -47,15 +82,38 @@ async function bootstrap() {
   // Use cookie parser
   app.use(cookieParser());
 
-  // Enable CORS with specific options
+  // Enable CORS with enhanced security options
   app.enableCors({
-    origin: configService.get('ALLOWED_ORIGINS'),
+    origin: configService.get('ALLOWED_ORIGINS').split(','),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['X-Total-Count'],
     credentials: true,
+    maxAge: 3600,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
-  // Swagger setup
+  // Apply rate limiting globally with a more robust strategy
+  app.use(
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        ttl: config.get('THROTTLE_TTL', 60),
+        limit: config.get('THROTTLE_LIMIT', 100),
+      }),
+    }),
+  );
+  app.useGlobalGuards(app.get(ThrottlerGuard));
+
+  // Enable CSRF protection
+  app.use(csurf());
+
+  // Enable HTTP Parameter Pollution protection
+  app.use(hpp());
+
+  // Swagger setup with authentication
   const config = new DocumentBuilder()
     .setTitle('AI Recruitment Platform API')
     .setDescription('The API for the AI-powered recruitment platform')
@@ -68,6 +126,7 @@ async function bootstrap() {
   // Add version information to Swagger UI
   const options = {
     swaggerOptions: {
+      persistAuthorization: true,
       urls: [
         {
           url: '/api-json',

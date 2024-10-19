@@ -26,6 +26,8 @@ export class AuditLoggingService {
         action,
         details,
         timestamp: new Date().toISOString(),
+        ip_address: details.ip_address || null,
+        user_agent: details.user_agent || null,
       });
 
       if (error) throw new Error(`Failed to log action: ${error.message}`);
@@ -72,6 +74,7 @@ export class AuditLoggingService {
         2. Unusual patterns or behaviors
         3. Potential security concerns
         4. Recommendations for improving system usage and security
+        5. Any suspicious activities or potential insider threats
       `;
 
       const response = await axios.post(

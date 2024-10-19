@@ -1,6 +1,6 @@
-import { Controller, Post, Body, Get, Headers, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Get, Headers, UseGuards, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { UserManagementService } from './user-management.service';
-import { ApiTags, ApiOperation, ApiResponse, ApiHeader } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from './auth.guard';
 
 @ApiTags('user-management')
@@ -29,6 +29,7 @@ export class UserManagementController {
   @ApiResponse({ status: 200, description: 'User logged out successfully' })
   @ApiHeader({ name: 'Authorization', description: 'Bearer token' })
   @UseGuards(AuthGuard)
+  @ApiBearerAuth()
   async logout(@Headers('authorization') auth: string) {
     const token = auth.split(' ')[1];
     await this.userManagementService.logout(token);
@@ -40,6 +41,7 @@ export class UserManagementController {
   @ApiResponse({ status: 200, description: 'User profile retrieved successfully' })
   @ApiHeader({ name: 'Authorization', description: 'Bearer token' })
   @UseGuards(AuthGuard)
+  @ApiBearerAuth()
   async getProfile(@Headers('authorization') auth: string) {
     const token = auth.split(' ')[1];
     const user = await this.userManagementService.getUser(token);
@@ -54,11 +56,48 @@ export class UserManagementController {
     return { message: 'Token refreshed successfully', session: newSession };
   }
 
-  @Post('reset-password')
-  @ApiOperation({ summary: 'Reset user password' })
+  @Post('reset-password-request')
+  @ApiOperation({ summary: 'Request password reset' })
   @ApiResponse({ status: 200, description: 'Password reset email sent successfully' })
-  async resetPassword(@Body('email') email: string) {
+  async resetPasswordRequest(@Body('email') email: string) {
     await this.userManagementService.resetPassword(email);
     return { message: 'Password reset email sent successfully' };
+  }
+
+  @Post('reset-password-confirm')
+  @ApiOperation({ summary: 'Confirm password reset' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  async resetPasswordConfirm(@Body('token') token: string, @Body('newPassword') newPassword: string) {
+    await this.userManagementService.confirmResetPassword(token, newPassword);
+    return { message: 'Password reset successfully' };
+  }
+
+  @Post('enable-2fa')
+  @ApiOperation({ summary: 'Enable 2FA for a user' })
+  @ApiResponse({ status: 200, description: '2FA enabled successfully' })
+  @ApiHeader({ name: 'Authorization', description: 'Bearer token' })
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  async enable2FA(@Headers('authorization') auth: string) {
+    const token = auth.split(' ')[1];
+    const user = await this.userManagementService.getUser(token);
+    const secret = await this.userManagementService.enable2FA(user.id);
+    return { message: '2FA enabled successfully', secret };
+  }
+
+  @Post('verify-2fa')
+  @ApiOperation({ summary: 'Verify 2FA token' })
+  @ApiResponse({ status: 200, description: '2FA token verified successfully' })
+  @ApiHeader({ name: 'Authorization', description: 'Bearer token' })
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  async verify2FA(@Headers('authorization') auth: string, @Body('token') token: string) {
+    const authToken = auth.split(' ')[1];
+    const user = await this.userManagementService.getUser(authToken);
+    const isValid = await this.userManagementService.verify2FA(user.id, token);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid 2FA token');
+    }
+    return { message: '2FA token verified successfully' };
   }
 }

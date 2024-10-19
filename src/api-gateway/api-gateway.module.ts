@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ApiGatewayController } from './api-gateway.controller';
 import { ApiGatewayService } from './api-gateway.service';
 import { UserManagementModule } from '../user-management/user-management.module';
@@ -11,6 +11,7 @@ import { AuditLoggingModule } from '../audit-logging/audit-logging.module';
 import { EventEmitterService } from '../common/events/event.emitter';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthGuard } from '../user-management/auth.guard';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
@@ -18,13 +19,18 @@ import { AuthGuard } from '../user-management/auth.guard';
     UserManagementModule,
     ThrottlerModule.forRoot({
       ttl: 60,
-      limit: 10,
+      limit: 100, // Increased limit to match the new rate limiter configuration
     }),
     AuditLoggingModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: '1h' },
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET'),
+        signOptions: { expiresIn: '1h' },
+      }),
+      inject: [ConfigService],
     }),
+    CommonModule,
   ],
   controllers: [ApiGatewayController],
   providers: [
