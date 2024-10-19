@@ -11,6 +11,7 @@ import { MlModelManagementModule } from './ml-model-management/ml-model-manageme
 import { NotificationModule } from './notification/notification.module';
 import { AuditLoggingModule } from './audit-logging/audit-logging.module';
 import { ErrorHandlingMonitoringModule } from './error-handling-monitoring/error-handling-monitoring.module';
+import { SecurityModule } from './security/security.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { ErrorHandlingMonitoringModule } from './error-handling-monitoring/error
     NotificationModule,
     AuditLoggingModule,
     ErrorHandlingMonitoringModule,
+    SecurityModule,
   ],
 })
 export class AppModule {}
