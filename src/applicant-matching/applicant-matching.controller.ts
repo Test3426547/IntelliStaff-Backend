@@ -43,6 +43,13 @@ export class ApplicantMatchingController {
     return { message: 'Match removed successfully' };
   }
 
+  @Get('match/:id/report')
+  @ApiOperation({ summary: 'Generate a detailed match report' })
+  @ApiResponse({ status: 200, description: 'Match report generated successfully' })
+  async generateMatchReport(@Param('id') matchId: string) {
+    return this.applicantMatchingService.generateMatchReport(matchId);
+  }
+
   @Get('health')
   @HealthCheck()
   @ApiOperation({ summary: 'Check the health of the ApplicantMatching service' })
