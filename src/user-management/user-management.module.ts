@@ -1,11 +1,19 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { UserManagementService } from './user-management.service';
 import { UserManagementController } from './user-management.controller';
-import { AuthGuard } from './auth.guard';
+import { TerminusModule } from '@nestjs/terminus';
 
 @Module({
-  providers: [UserManagementService, AuthGuard],
+  imports: [ConfigModule, TerminusModule],
+  providers: [UserManagementService],
   controllers: [UserManagementController],
-  exports: [UserManagementService, AuthGuard],
+  exports: [UserManagementService],
 })
-export class UserManagementModule {}
+export class UserManagementModule implements OnModuleInit {
+  constructor(private userManagementService: UserManagementService) {}
+
+  onModuleInit() {
+    this.userManagementService.startCacheCleanup();
+  }
+}

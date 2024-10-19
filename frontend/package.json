@@ -17,7 +17,8 @@
     "nuxt": "^3.13.0",
     "primevue": "^4.1.1",
     "tailwindcss-primeui": "^0.3.4",
-    "vue": "latest",
+    "vue": "^3.5.12",
+    "vue-demi": "^0.14.6",
     "vue-router": "latest",
     "vue-use-spring": "^0.3.3"
   },

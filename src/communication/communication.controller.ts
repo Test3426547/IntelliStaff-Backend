@@ -1,141 +1,58 @@
-import { Controller, Post, Body, Get, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { CommunicationService } from './communication.service';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
-import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
-import { calendar_v3 } from 'googleapis';
+import { AuthGuard } from '../user-management/auth.guard';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 
 @ApiTags('communication')
 @Controller('communication')
-@UseGuards(ThrottlerGuard)
+@UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class CommunicationController {
-  constructor(private readonly communicationService: CommunicationService) {}
+  constructor(
+    private readonly communicationService: CommunicationService,
+    private health: HealthCheckService
+  ) {}
 
-  @Post('send-email')
-  @Throttle(10, 300000) // 10 requests per 5 minutes
+  @Post('email')
   @ApiOperation({ summary: 'Send an email' })
   @ApiResponse({ status: 200, description: 'Email sent successfully' })
-  @ApiBody({ 
-    schema: {
-      type: 'object',
-      properties: {
-        to: { type: 'string' },
-        subject: { type: 'string' },
-        text: { type: 'string' },
-      },
-    },
-  })
-  async sendEmail(
-    @Body('to') to: string,
-    @Body('subject') subject: string,
-    @Body('text') text: string,
-  ) {
-    await this.communicationService.sendEmail(to, subject, text);
+  async sendEmail(@Body() emailData: { to: string; subject: string; body: string }) {
+    await this.communicationService.sendEmail(emailData.to, emailData.subject, emailData.body);
     return { message: 'Email sent successfully' };
   }
 
-  @Post('send-sms')
-  @Throttle(2, 30000) // 2 requests per 30 seconds
+  @Post('sms')
   @ApiOperation({ summary: 'Send an SMS' })
   @ApiResponse({ status: 200, description: 'SMS sent successfully' })
-  @ApiBody({ 
-    schema: {
-      type: 'object',
-      properties: {
-        to: { type: 'string' },
-        body: { type: 'string' },
-      },
-    },
-  })
-  async sendSMS(
-    @Body('to') to: string,
-    @Body('body') body: string,
-  ) {
-    await this.communicationService.sendSMS(to, body);
+  async sendSMS(@Body() smsData: { to: string; body: string }) {
+    await this.communicationService.sendSMS(smsData.to, smsData.body);
     return { message: 'SMS sent successfully' };
   }
 
-  @Post('generate-ai-response')
-  @Throttle(10, 60000) // 10 requests per minute
-  @ApiOperation({ summary: 'Generate AI response' })
-  @ApiResponse({ status: 200, description: 'AI response generated successfully' })
-  @ApiBody({ 
-    schema: {
-      type: 'object',
-      properties: {
-        prompt: { type: 'string' },
-      },
-    },
-  })
-  async generateAIResponse(@Body('prompt') prompt: string) {
-    const response = await this.communicationService.generateAIResponse(prompt);
-    return { response };
-  }
-
-  @Get('logs')
-  @ApiOperation({ summary: 'Get communication logs' })
-  @ApiResponse({ status: 200, description: 'Return communication logs' })
-  async getCommunicationLogs() {
-    return this.communicationService.getCommunicationLogs();
-  }
-
-  @Post('sync-calendar')
-  @ApiOperation({ summary: 'Sync Google Calendar' })
-  @ApiResponse({ status: 200, description: 'Calendar synced successfully' })
-  @ApiBody({ 
-    schema: {
-      type: 'object',
-      properties: {
-        userId: { type: 'string' },
-        event: { 
-          type: 'object',
-          properties: {
-            summary: { type: 'string' },
-            location: { type: 'string' },
-            description: { type: 'string' },
-            start: { 
-              type: 'object',
-              properties: {
-                dateTime: { type: 'string' },
-                timeZone: { type: 'string' },
-              },
-            },
-            end: { 
-              type: 'object',
-              properties: {
-                dateTime: { type: 'string' },
-                timeZone: { type: 'string' },
-              },
-            },
-          },
-        },
-      },
-    },
-  })
-  async syncGoogleCalendar(
-    @Body('userId') userId: string,
-    @Body('event') event: calendar_v3.Schema$Event,
-  ) {
-    await this.communicationService.syncGoogleCalendar(userId, event);
-    return { message: 'Calendar synced successfully' };
-  }
-
-  @Post('send-push-notification')
-  @ApiOperation({ summary: 'Send push notification' })
+  @Post('push-notification')
+  @ApiOperation({ summary: 'Send a push notification' })
   @ApiResponse({ status: 200, description: 'Push notification sent successfully' })
-  @ApiBody({ 
-    schema: {
-      type: 'object',
-      properties: {
-        userId: { type: 'string' },
-        message: { type: 'string' },
-      },
-    },
-  })
-  async sendPushNotification(
-    @Body('userId') userId: string,
-    @Body('message') message: string,
-  ) {
-    await this.communicationService.sendPushNotification(userId, message);
+  async sendPushNotification(@Body() notificationData: { userId: string; title: string; body: string }) {
+    await this.communicationService.sendPushNotification(notificationData.userId, notificationData.title, notificationData.body);
     return { message: 'Push notification sent successfully' };
+  }
+
+  @Post('log')
+  @ApiOperation({ summary: 'Log a communication' })
+  @ApiResponse({ status: 200, description: 'Communication logged successfully' })
+  async logCommunication(@Body() logData: { userId: string; type: string; details: any }) {
+    await this.communicationService.logCommunication(logData.userId, logData.type, logData.details);
+    return { message: 'Communication logged successfully' };
+  }
+
+  @HealthCheck()
+  @ApiOperation({ summary: 'Check the health of the Communication service' })
+  @ApiResponse({ status: 200, description: 'Service is healthy' })
+  @ApiResponse({ status: 503, description: 'Service is unhealthy' })
+  async checkHealth() {
+    return this.health.check([
+      () => this.communicationService.checkHealth(),
+    ]);
   }
 }

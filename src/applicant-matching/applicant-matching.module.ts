@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ApplicantMatchingService } from './applicant-matching.service';
 import { ApplicantMatchingController } from './applicant-matching.controller';
-import { ConfigModule } from '@nestjs/config';
+import { TerminusModule } from '@nestjs/terminus';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, TerminusModule],
   providers: [ApplicantMatchingService],
   controllers: [ApplicantMatchingController],
   exports: [ApplicantMatchingService],

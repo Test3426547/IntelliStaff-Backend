@@ -1,19 +1,13 @@
-
 import { Module } from '@nestjs/common';
-import { JobIngestionModule } from '../job-ingestion/job-ingestion.module';
-import { JobProcessingModule } from '../job-processing/job-processing.module';
-import { JobRelistingModule } from '../job-relisting/job-relisting.module';
+import { ConfigModule } from '@nestjs/config';
+import { JobService } from './job.service';
+import { JobController } from './job.controller';
+import { TerminusModule } from '@nestjs/terminus';
 
 @Module({
-  imports: [
-    JobIngestionModule,
-    JobProcessingModule,
-    JobRelistingModule,
-  ],
-  exports: [
-    JobIngestionModule,
-    JobProcessingModule,
-    JobRelistingModule,
-  ],
+  imports: [ConfigModule, TerminusModule],
+  providers: [JobService],
+  controllers: [JobController],
+  exports: [JobService],
 })
 export class JobModule {}

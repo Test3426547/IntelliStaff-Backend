@@ -12,6 +12,8 @@ import { EventEmitterService } from '../common/events/event.emitter';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthGuard } from '../user-management/auth.guard';
 import { CommonModule } from '../common/common.module';
+import { TerminusModule } from '@nestjs/terminus';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
@@ -19,7 +21,7 @@ import { CommonModule } from '../common/common.module';
     UserManagementModule,
     ThrottlerModule.forRoot({
       ttl: 60,
-      limit: 100, // Increased limit to match the new rate limiter configuration
+      limit: 100,
     }),
     AuditLoggingModule,
     JwtModule.registerAsync({
@@ -31,6 +33,8 @@ import { CommonModule } from '../common/common.module';
       inject: [ConfigService],
     }),
     CommonModule,
+    TerminusModule,
+    HttpModule,
   ],
   controllers: [ApiGatewayController],
   providers: [

@@ -2,11 +2,15 @@ import { Controller, Post, Body, Get, Headers, UseGuards, BadRequestException, U
 import { UserManagementService } from './user-management.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from './auth.guard';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 
 @ApiTags('user-management')
 @Controller('user-management')
 export class UserManagementController {
-  constructor(private readonly userManagementService: UserManagementService) {}
+  constructor(
+    private readonly userManagementService: UserManagementService,
+    private health: HealthCheckService
+  ) {}
 
   @Post('register')
   @ApiOperation({ summary: 'Register a new user' })
@@ -99,5 +103,16 @@ export class UserManagementController {
       throw new UnauthorizedException('Invalid 2FA token');
     }
     return { message: '2FA token verified successfully' };
+  }
+
+  @Get('health')
+  @HealthCheck()
+  @ApiOperation({ summary: 'Check the health of the User Management service' })
+  @ApiResponse({ status: 200, description: 'Service is healthy' })
+  @ApiResponse({ status: 503, description: 'Service is unhealthy' })
+  async checkHealth() {
+    return this.health.check([
+      () => this.userManagementService.checkHealth(),
+    ]);
   }
 }

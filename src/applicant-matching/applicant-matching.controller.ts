@@ -1,55 +1,56 @@
-import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { ApplicantMatchingService } from './applicant-matching.service';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { AuthGuard } from '../user-management/auth.guard';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 
 @ApiTags('applicant-matching')
 @Controller('applicant-matching')
+@UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class ApplicantMatchingController {
-  constructor(private readonly applicantMatchingService: ApplicantMatchingService) {}
+  constructor(
+    private readonly applicantMatchingService: ApplicantMatchingService,
+    private health: HealthCheckService
+  ) {}
 
   @Post('match')
-  @ApiOperation({ summary: 'Match an applicant with a job' })
-  @ApiResponse({ status: 200, description: 'Returns the match score' })
-  async matchApplicant(
-    @Body('applicantId') applicantId: string,
-    @Body('jobId') jobId: string,
-  ) {
-    const matchScore = await this.applicantMatchingService.matchApplicant(applicantId, jobId);
-    return { matchScore };
+  @ApiOperation({ summary: 'Match an applicant to a job' })
+  @ApiResponse({ status: 201, description: 'Match created successfully' })
+  async matchApplicantToJob(@Body('applicantId') applicantId: string, @Body('jobId') jobId: string) {
+    return this.applicantMatchingService.matchApplicantToJob(applicantId, jobId);
   }
 
-  @Get('job/:jobId/top-matches')
-  @ApiOperation({ summary: 'Get top matches for a job' })
-  @ApiResponse({ status: 200, description: 'Returns the top matches for a job' })
-  @ApiParam({ name: 'jobId', type: 'string' })
-  @ApiQuery({ name: 'limit', type: 'number', required: false })
-  async getTopMatchesForJob(
-    @Param('jobId') jobId: string,
-    @Query('limit') limit: number,
-  ) {
-    return this.applicantMatchingService.getTopMatchesForJob(jobId, limit);
+  @Get('applicant/:id')
+  @ApiOperation({ summary: 'Get matches for an applicant' })
+  @ApiResponse({ status: 200, description: 'Matches retrieved successfully' })
+  async getMatchesForApplicant(@Param('id') applicantId: string) {
+    return this.applicantMatchingService.getMatchesForApplicant(applicantId);
   }
 
-  @Get('applicant/:applicantId/top-matches')
-  @ApiOperation({ summary: 'Get top matches for an applicant' })
-  @ApiResponse({ status: 200, description: 'Returns the top matches for an applicant' })
-  @ApiParam({ name: 'applicantId', type: 'string' })
-  @ApiQuery({ name: 'limit', type: 'number', required: false })
-  async getTopMatchesForApplicant(
-    @Param('applicantId') applicantId: string,
-    @Query('limit') limit: number,
-  ) {
-    return this.applicantMatchingService.getTopMatchesForApplicant(applicantId, limit);
+  @Get('job/:id')
+  @ApiOperation({ summary: 'Get matches for a job' })
+  @ApiResponse({ status: 200, description: 'Matches retrieved successfully' })
+  async getMatchesForJob(@Param('id') jobId: string) {
+    return this.applicantMatchingService.getMatchesForJob(jobId);
   }
 
-  @Post('enhance-matching')
-  @ApiOperation({ summary: 'Enhance matching with HuggingFace AI' })
-  @ApiResponse({ status: 200, description: 'Returns enhanced matching analysis' })
-  async enhanceMatching(
-    @Body('applicantId') applicantId: string,
-    @Body('jobId') jobId: string,
-  ) {
-    const analysis = await this.applicantMatchingService.enhanceMatchingWithHuggingFace(applicantId, jobId);
-    return { analysis };
+  @Delete('match/:id')
+  @ApiOperation({ summary: 'Remove a match' })
+  @ApiResponse({ status: 200, description: 'Match removed successfully' })
+  async removeMatch(@Param('id') matchId: string) {
+    await this.applicantMatchingService.removeMatch(matchId);
+    return { message: 'Match removed successfully' };
+  }
+
+  @Get('health')
+  @HealthCheck()
+  @ApiOperation({ summary: 'Check the health of the ApplicantMatching service' })
+  @ApiResponse({ status: 200, description: 'Service is healthy' })
+  @ApiResponse({ status: 503, description: 'Service is unhealthy' })
+  async checkHealth() {
+    return this.health.check([
+      () => this.applicantMatchingService.checkHealth(),
+    ]);
   }
 }
