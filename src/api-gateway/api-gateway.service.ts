@@ -1,18 +1,19 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UserManagementService } from '../user-management/user-management.service';
 import axios, { AxiosInstance } from 'axios';
 import { JwtService } from '@nestjs/jwt';
+import { LoggingService } from '../common/services/logging.service';
 
 @Injectable()
 export class ApiGatewayService {
-  private readonly logger = new Logger(ApiGatewayService.name);
   private serviceInstances: { [key: string]: AxiosInstance } = {};
 
   constructor(
     private configService: ConfigService,
     private userManagementService: UserManagementService,
     private jwtService: JwtService,
+    private loggingService: LoggingService,
   ) {
     this.initializeServiceInstances();
   }
@@ -62,9 +63,10 @@ export class ApiGatewayService {
         headers,
       });
 
+      this.loggingService.log(`Request routed successfully: ${method} ${path}`, 'ApiGatewayService');
       return response.data;
     } catch (error) {
-      this.logger.error(`Error routing request: ${error.message}`);
+      this.loggingService.error(`Error routing request: ${error.message}`, error.stack, 'ApiGatewayService');
       throw error;
     }
   }

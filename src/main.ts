@@ -2,15 +2,26 @@ import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { VersioningType, ValidationPipe } from '@nestjs/common';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import helmet from 'helmet';
 import * as compression from 'compression';
 import * as cookieParser from 'cookie-parser';
 import { ConfigService } from '@nestjs/config';
+import { AuditLoggingService } from './audit-logging/audit-logging.service';
+import { LoggingMiddleware } from './common/middleware/logging.middleware';
+import { SentryService } from './common/services/sentry.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+  const auditLoggingService = app.get(AuditLoggingService);
+  const sentryService = app.get(SentryService);
+
+  // Initialize Sentry
+  sentryService.initialize();
+
+  // Apply LoggingMiddleware
+  app.use(new LoggingMiddleware().use);
 
   // Enable API versioning
   app.enableVersioning({
@@ -25,10 +36,7 @@ async function bootstrap() {
   }));
 
   // Apply global filters
-  app.useGlobalFilters(new HttpExceptionFilter(
-    app.get('AuditLoggingService'),
-    app.get('EventEmitterService')
-  ));
+  app.useGlobalFilters(new GlobalExceptionFilter(auditLoggingService, sentryService));
 
   // Use Helmet for security headers
   app.use(helmet());

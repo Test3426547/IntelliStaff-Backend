@@ -1,20 +1,23 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import * as tf from '@tensorflow/tfjs-node';
+import { LoggingService } from '../common/services/logging.service';
 
 @Injectable()
 export class MlModelManagementService {
   private supabase: SupabaseClient;
-  private readonly logger = new Logger(MlModelManagementService.name);
   private huggingfaceApiKey: string;
   private huggingfaceInferenceEndpoint: string;
   private modelCache: Map<string, { model: any; expiration: number }> = new Map();
   private readonly CACHE_EXPIRATION = 3600000; // 1 hour in milliseconds
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private loggingService: LoggingService
+  ) {
     this.supabase = createClient(
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
@@ -29,7 +32,7 @@ export class MlModelManagementService {
       const cachedModel = this.modelCache.get(cacheKey);
 
       if (cachedModel && cachedModel.expiration > Date.now()) {
-        this.logger.debug(`Cache hit for model: ${modelName}, version: ${version || 'latest'}`);
+        this.loggingService.debug(`Cache hit for model: ${modelName}, version: ${version || 'latest'}`, 'MlModelManagementService');
         return cachedModel.model;
       }
 
@@ -47,7 +50,7 @@ export class MlModelManagementService {
       this.modelCache.set(cacheKey, { model, expiration: Date.now() + this.CACHE_EXPIRATION });
       return model;
     } catch (error) {
-      this.logger.error(`Error in getModel: ${error.message}`);
+      this.loggingService.error(`Error in getModel: ${error.message}`, error.stack, 'MlModelManagementService');
       throw error;
     }
   }
@@ -75,9 +78,9 @@ export class MlModelManagementService {
       this.modelCache.clear(); // Clear cache on update
       await this.logModelLifecycleEvent(modelName, version, 'created');
       await this.logModelUpdate(modelName, version, 'Model updated');
-      this.logger.log(`Model ${modelName} updated successfully with version ${version}`);
+      this.loggingService.log(`Model ${modelName} updated successfully with version ${version}`, 'MlModelManagementService');
     } catch (error) {
-      this.logger.error(`Error in updateModel: ${error.message}`);
+      this.loggingService.error(`Error in updateModel: ${error.message}`, error.stack, 'MlModelManagementService');
       throw error;
     }
   }
@@ -95,7 +98,7 @@ export class MlModelManagementService {
 
       return data;
     } catch (error) {
-      this.logger.error(`Error in getAllModelVersions: ${error.message}`);
+      this.loggingService.error(`Error in getAllModelVersions: ${error.message}`, error.stack, 'MlModelManagementService');
       throw error;
     }
   }
@@ -112,9 +115,9 @@ export class MlModelManagementService {
         });
 
       if (error) throw new InternalServerErrorException(`Failed to track model performance: ${error.message}`);
-      this.logger.log(`Performance metrics tracked for model ${modelName} version ${version}`);
+      this.loggingService.log(`Performance metrics tracked for model ${modelName} version ${version}`, 'MlModelManagementService');
     } catch (error) {
-      this.logger.error(`Error in trackModelPerformance: ${error.message}`);
+      this.loggingService.error(`Error in trackModelPerformance: ${error.message}`, error.stack, 'MlModelManagementService');
       throw error;
     }
   }
@@ -134,7 +137,7 @@ export class MlModelManagementService {
 
       return response.data;
     } catch (error) {
-      this.logger.error(`Error in runHuggingFaceInference: ${error.message}`);
+      this.loggingService.error(`Error in runHuggingFaceInference: ${error.message}`, error.stack, 'MlModelManagementService');
       throw new InternalServerErrorException('Failed to run inference using HuggingFace API');
     }
   }
@@ -156,7 +159,7 @@ export class MlModelManagementService {
 
       return performanceData;
     } catch (error) {
-      this.logger.error(`Error in compareModelVersions: ${error.message}`);
+      this.loggingService.error(`Error in compareModelVersions: ${error.message}`, error.stack, 'MlModelManagementService');
       throw error;
     }
   }
@@ -186,9 +189,9 @@ export class MlModelManagementService {
 
       this.modelCache.clear(); // Clear cache on rollback
       await this.logModelLifecycleEvent(modelName, newVersion, 'rolled back');
-      this.logger.log(`Model ${modelName} rolled back to version ${version} with new version ${newVersion}`);
+      this.loggingService.log(`Model ${modelName} rolled back to version ${version} with new version ${newVersion}`, 'MlModelManagementService');
     } catch (error) {
-      this.logger.error(`Error in rollbackModel: ${error.message}`);
+      this.loggingService.error(`Error in rollbackModel: ${error.message}`, error.stack, 'MlModelManagementService');
       throw error;
     }
   }
@@ -210,7 +213,7 @@ export class MlModelManagementService {
 
       if (error) throw new Error(`Failed to log model lifecycle event: ${error.message}`);
     } catch (error) {
-      this.logger.error(`Error in logModelLifecycleEvent: ${error.message}`);
+      this.loggingService.error(`Error in logModelLifecycleEvent: ${error.message}`, error.stack, 'MlModelManagementService');
     }
   }
 
@@ -227,7 +230,7 @@ export class MlModelManagementService {
 
       if (error) throw new Error(`Failed to log model update: ${error.message}`);
     } catch (error) {
-      this.logger.error(`Error in logModelUpdate: ${error.message}`);
+      this.loggingService.error(`Error in logModelUpdate: ${error.message}`, error.stack, 'MlModelManagementService');
     }
   }
 
@@ -240,7 +243,7 @@ export class MlModelManagementService {
         clearedCount++;
       }
     }
-    this.logger.debug(`Cleared ${clearedCount} expired entries from model cache`);
+    this.loggingService.debug(`Cleared ${clearedCount} expired entries from model cache`, 'MlModelManagementService');
   }
 
   startCacheCleanupInterval(): void {

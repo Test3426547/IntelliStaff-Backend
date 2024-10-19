@@ -75,13 +75,13 @@
         "../public/*"
       ],
       "#app": [
-        "../../node_modules/nuxt/dist/app"
+        "../node_modules/nuxt/dist/app"
       ],
       "#app/*": [
-        "../../node_modules/nuxt/dist/app/*"
+        "../node_modules/nuxt/dist/app/*"
       ],
       "vue-demi": [
-        "../../node_modules/nuxt/dist/app/compat/vue-demi"
+        "../node_modules/nuxt/dist/app/compat/vue-demi"
       ],
       "pinia": [
         "../../node_modules/pinia/dist/pinia"
@@ -93,13 +93,13 @@
         "../../node_modules/@nuxt/image/dist/runtime/*"
       ],
       "#mdc-configs": [
-        "./mdc-configs.mjs"
+        "./mdc-configs"
       ],
       "#mdc-highlighter": [
-        "./mdc-highlighter.mjs"
+        "./mdc-highlighter"
       ],
       "#mdc-imports": [
-        "./mdc-imports.mjs"
+        "./mdc-imports"
       ],
       "#vue-router": [
         "../node_modules/vue-router"
@@ -108,7 +108,7 @@
         "./imports"
       ],
       "#app-manifest": [
-        "./manifest/meta/d2d3e287-d5d5-4135-912e-58a5b0f4dc60.json"
+        "./manifest/meta/dev"
       ],
       "#build": [
         "."
@@ -175,15 +175,13 @@
     "../node_modules/@nuxt/telemetry/runtime",
     "../node_modules/@nuxt/telemetry/dist/runtime",
     "..",
-    "../../node_modules/nuxt/dist/app",
-    "../../node_modules/nuxt/dist/app/compat/vue-demi",
     "../../node_modules/pinia/dist/pinia"
   ],
   "exclude": [
     "../dist",
     "../node_modules",
     "../../node_modules",
-    "../../node_modules/nuxt/node_modules",
+    "../node_modules/nuxt/node_modules",
     "../../node_modules/@nuxtjs/tailwindcss/runtime/server",
     "../../node_modules/@nuxtjs/tailwindcss/dist/runtime/server",
     "../../node_modules/@pinia/nuxt/runtime/server",

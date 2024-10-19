@@ -66,6 +66,9 @@ export { default as Meteors } from './meteor/Meteors.vue'
 // Particles Background
 export { default as ParticlesBg } from './particles-bg/ParticlesBg.vue'
 
+// Radiant Text
+export { default as RadiantText } from './radiant-text/RadiantText.vue'
+
 // Shimmer Button
 export { default as ShimmerButton } from './shimmer-button/ShimmerButton.vue'
 

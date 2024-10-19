@@ -44,4 +44,5 @@ export { flatUnwrap as unwrapSlot } from '../../node_modules/@nuxtjs/mdc/dist/ru
 export { parseMarkdown } from '../../node_modules/@nuxtjs/mdc/dist/runtime/parser';
 export { useGtag } from '../../node_modules/nuxt-gtag/dist/runtime/composables/useGtag';
 export { useTrackEvent } from '../../node_modules/nuxt-gtag/dist/runtime/composables/useTrackEvent';
-export { definePageMeta } from '../../node_modules/nuxt/dist/pages/runtime/composables';
+export { useNuxtDevTools } from '../node_modules/@nuxt/devtools/dist/runtime/use-nuxt-devtools';
+export { definePageMeta } from '../node_modules/nuxt/dist/pages/runtime/composables';

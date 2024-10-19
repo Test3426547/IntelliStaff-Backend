@@ -2,7 +2,6 @@
 import { ref, onMounted } from 'vue'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import { Button, InputText, Textarea } from '@/components/ui/inspiria'
 import { CardContainer, CardBody, CardItem } from "@/components/ui/inspiria"
 
 gsap.registerPlugin(ScrollTrigger)

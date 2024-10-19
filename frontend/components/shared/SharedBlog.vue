@@ -73,12 +73,16 @@ const meteors = computed(() => Array(20).fill(null).map(() => ({
       <GlowBorder
         v-for="(item, index) in blogs"
         :key="index"
-        class="w-full flex-1 rounded-md overflow-hidden h-full bg-surface-0 dark:bg-surface-900 shadow-[0px_2px_6px_0px_rgba(0,0,0,0.12),0px_0px_2px_0px_rgba(0,0,0,0.06),0px_4px_10px_0px_rgba(0,0,0,0.03)]"
-        :color="['#A07CFE', '#FE8FB5', '#FFBE7B']"
-        @click="triggerFireworks"
+        class="relative w-full h-60 lg:h-40"
       >
-        <div class="relative w-full h-60 lg:h-40">
-          <NuxtImg :src="item.cover" :alt="item.title" class="block w-full h-full object-cover" />
+        <NuxtImg
+          v-if="item.cover"
+          :src="item.cover"
+          :alt="item.title"
+          class="block w-full h-full object-cover"
+        />
+        <div v-else class="w-full h-full bg-gray-200 dark:bg-gray-700"></div>
+        <div class="absolute inset-0 overflow-hidden">
           <div class="absolute inset-0 overflow-hidden">
             <span
               v-for="(meteor, i) in meteors"
@@ -106,14 +110,14 @@ const meteors = computed(() => Array(20).fill(null).map(() => ({
           >
             {{ item.category }}
           </span>
-          <h3 class="text-xl text-surface-900 dark:text-surface-0 font-medium leading-normal">
-            {{ item.title }}
-          </h3>
-          <p class="leading-normal text-surface-700 dark:text-surface-200 my-4">
-            {{ item.description }}
-          </p>
-          <div class="flex items-start gap-2">
-            <Avatar :image="item.author.image" :alt="item.author.name" shape="circle" size="large" />
+          <div class="flex items-start gap-2" v-if="item.author">
+            <Avatar
+              v-if="item.author.image"
+              :image="item.author.image"
+              :alt="item.author.name"
+              shape="circle"
+              size="large"
+            />
             <div>
               <div class="text-sm font-bold text-surface-900 dark:text-surface-0 mb-1">
                 {{ item.author.name }}
