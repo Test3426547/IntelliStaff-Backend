@@ -12,6 +12,7 @@ import { NotificationModule } from './notification/notification.module';
 import { AuditLoggingModule } from './audit-logging/audit-logging.module';
 import { ErrorHandlingMonitoringModule } from './error-handling-monitoring/error-handling-monitoring.module';
 import { SecurityModule } from './security/security.module';
+import { DataStorageModule } from './data-storage/data-storage.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { SecurityModule } from './security/security.module';
     AuditLoggingModule,
     ErrorHandlingMonitoringModule,
     SecurityModule,
+    DataStorageModule,
   ],
 })
 export class AppModule {}

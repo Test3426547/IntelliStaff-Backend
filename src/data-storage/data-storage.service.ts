@@ -1,136 +1,110 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectConnection } from '@nestjs/typeorm';
+import { Connection, Repository, EntityTarget, FindManyOptions, DeepPartial } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class DataStorageService {
-  private supabase: SupabaseClient;
   private readonly logger = new Logger(DataStorageService.name);
 
   constructor(
+    @InjectConnection() private connection: Connection,
     private configService: ConfigService,
-  ) {
-    this.supabase = createClient(
-      this.configService.get<string>('SUPABASE_URL'),
-      this.configService.get<string>('SUPABASE_KEY'),
+  ) {}
+
+  async createEntity<T>(entity: EntityTarget<T>, data: DeepPartial<T>): Promise<T> {
+    const repository = this.getRepository(entity);
+    const newEntity = repository.create(data);
+    return await repository.save(newEntity as T);
+  }
+
+  async findEntity<T>(entity: EntityTarget<T>, id: string | number): Promise<T | undefined> {
+    const repository = this.getRepository(entity);
+    return await repository.findOne({ where: { id } as any });
+  }
+
+  async findEntities<T>(entity: EntityTarget<T>, options?: FindManyOptions<T>): Promise<T[]> {
+    const repository = this.getRepository(entity);
+    return await repository.find(options);
+  }
+
+  async updateEntity<T>(entity: EntityTarget<T>, id: string | number, data: DeepPartial<T>): Promise<T | undefined> {
+    const repository = this.getRepository(entity);
+    await repository.update(id, data as any);
+    return await this.findEntity(entity, id);
+  }
+
+  async deleteEntity<T>(entity: EntityTarget<T>, id: string | number): Promise<void> {
+    const repository = this.getRepository(entity);
+    await repository.delete(id);
+  }
+
+  async executeQuery(query: string, parameters?: any[]): Promise<any> {
+    return await this.connection.query(query, parameters);
+  }
+
+  async getTableNames(): Promise<string[]> {
+    const tables = await this.connection.query(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
     );
+    return tables.map(table => table.table_name);
   }
 
-  async createEntity(entityName: string, data: any): Promise<any> {
+  private getRepository<T>(entity: EntityTarget<T>): Repository<T> {
+    return this.connection.getRepository(entity);
+  }
+
+  async backupDatabase(): Promise<string> {
+    const databaseUrl = this.configService.get<string>('DATABASE_URL');
+    const backupPath = path.join(__dirname, '..', '..', 'backups');
+    const fileName = `backup_${new Date().toISOString().replace(/:/g, '-')}.sql`;
+    const fullPath = path.join(backupPath, fileName);
+
+    if (!fs.existsSync(backupPath)) {
+      fs.mkdirSync(backupPath, { recursive: true });
+    }
+
     try {
-      const { data: createdEntity, error } = await this.supabase
-        .from(entityName)
-        .insert(data)
-        .single();
+      await new Promise((resolve, reject) => {
+        const { exec } = require('child_process');
+        exec(`pg_dump ${databaseUrl} > ${fullPath}`, (error, stdout, stderr) => {
+          if (error) {
+            this.logger.error(`Error during database backup: ${error.message}`);
+            reject(error);
+          } else {
+            this.logger.log(`Database backup created successfully at ${fullPath}`);
+            resolve(stdout);
+          }
+        });
+      });
 
-      if (error) throw new Error(`Failed to create entity: ${error.message}`);
-
-      return createdEntity;
+      return fullPath;
     } catch (error) {
-      this.logger.error(`Error creating entity: ${error.message}`);
+      this.logger.error(`Failed to create database backup: ${error.message}`);
       throw error;
     }
   }
 
-  async getEntity(entityName: string, id: string): Promise<any> {
+  async restoreDatabase(backupPath: string): Promise<void> {
+    const databaseUrl = this.configService.get<string>('DATABASE_URL');
+
     try {
-      const { data: entity, error } = await this.supabase
-        .from(entityName)
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error) throw new Error(`Failed to get entity: ${error.message}`);
-
-      return entity;
+      await new Promise((resolve, reject) => {
+        const { exec } = require('child_process');
+        exec(`psql ${databaseUrl} < ${backupPath}`, (error, stdout, stderr) => {
+          if (error) {
+            this.logger.error(`Error during database restore: ${error.message}`);
+            reject(error);
+          } else {
+            this.logger.log(`Database restored successfully from ${backupPath}`);
+            resolve(stdout);
+          }
+        });
+      });
     } catch (error) {
-      this.logger.error(`Error getting entity: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async updateEntity(entityName: string, id: string, data: any): Promise<any> {
-    try {
-      const { data: updatedEntity, error } = await this.supabase
-        .from(entityName)
-        .update(data)
-        .eq('id', id)
-        .single();
-
-      if (error) throw new Error(`Failed to update entity: ${error.message}`);
-
-      return updatedEntity;
-    } catch (error) {
-      this.logger.error(`Error updating entity: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async deleteEntity(entityName: string, id: string): Promise<void> {
-    try {
-      const { error } = await this.supabase
-        .from(entityName)
-        .delete()
-        .eq('id', id);
-
-      if (error) throw new Error(`Failed to delete entity: ${error.message}`);
-    } catch (error) {
-      this.logger.error(`Error deleting entity: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async backupData(entityName: string): Promise<string> {
-    try {
-      const { data, error } = await this.supabase
-        .from(entityName)
-        .select('*');
-
-      if (error) throw new Error(`Failed to fetch data for backup: ${error.message}`);
-
-      const backupFileName = `${entityName}_backup_${Date.now()}.json`;
-      const { error: uploadError } = await this.supabase
-        .storage
-        .from('backups')
-        .upload(backupFileName, JSON.stringify(data));
-
-      if (uploadError) throw new Error(`Failed to upload backup: ${uploadError.message}`);
-
-      return backupFileName;
-    } catch (error) {
-      this.logger.error(`Error backing up data: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async restoreData(entityName: string, backupFileName: string): Promise<void> {
-    try {
-      const { data, error: downloadError } = await this.supabase
-        .storage
-        .from('backups')
-        .download(backupFileName);
-
-      if (downloadError) throw new Error(`Failed to download backup: ${downloadError.message}`);
-
-      const backupData = JSON.parse(await data.text());
-
-      const { error: deleteError } = await this.supabase
-        .from(entityName)
-        .delete();
-
-      if (deleteError) throw new Error(`Failed to clear existing data: ${deleteError.message}`);
-
-      const { error: insertError } = await this.supabase
-        .from(entityName)
-        .insert(backupData);
-
-      if (insertError) throw new Error(`Failed to restore data: ${insertError.message}`);
-
-      this.logger.log(`Data restored successfully for ${entityName}`);
-    } catch (error) {
-      this.logger.error(`Error restoring data: ${error.message}`);
+      this.logger.error(`Failed to restore database: ${error.message}`);
       throw error;
     }
   }
