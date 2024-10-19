@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { UserManagementService } from './user-management.service';
 import { UserManagementController } from './user-management.controller';

@@ -27,6 +27,10 @@ args = "Analytics Service Test"
 task = "workflow.run"
 args = "Resume Ingestion Test"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Test Job Ingestion"
+
 [[workflows.workflow]]
 name = "Start NestJS Server"
 author = "agent"
@@ -71,6 +75,17 @@ agentRequireRestartOnSave = false
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run test src/resume-ingestion/resume-ingestion.service.spec.ts"
+
+[[workflows.workflow]]
+name = "Test Job Ingestion"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx ts-node src/test-job-ingestion.ts"
 
 [deployment]
 run = ["sh", "-c", "cd ai-recruitment-platform && npm run start:dev, ./start.sh"]

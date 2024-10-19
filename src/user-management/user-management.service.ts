@@ -1,26 +1,30 @@
-import { Injectable, Logger, InternalServerErrorException, UnauthorizedException, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Injectable, Logger, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as speakeasy from 'speakeasy';
 import * as qrcode from 'qrcode';
-import { HealthCheckError, HealthIndicator, HealthIndicatorResult } from '@nestjs/terminus';
-import { retry } from 'rxjs/operators';
-import { from, throwError } from 'rxjs';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
+import NodeCache from 'node-cache';
 import { CommonUtils } from '../common/common-utils';
 
 @Injectable()
 export class UserManagementService extends HealthIndicator {
   private supabase: SupabaseClient;
   private readonly logger = new Logger(UserManagementService.name);
-  private userCache: Map<string, any> = new Map();
-  private readonly CACHE_TTL = 300000; // 5 minutes in milliseconds
+  private userCache: NodeCache;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private jwtService: JwtService
+  ) {
     super();
     this.supabase = createClient(
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
     );
+    this.userCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
   }
 
   async checkHealth(): Promise<HealthIndicatorResult> {
@@ -47,7 +51,7 @@ export class UserManagementService extends HealthIndicator {
       throw new BadRequestException('Password does not meet strength requirements');
     }
 
-    const hashedPassword = await CommonUtils.hashPassword(password);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     return this.retryOperation(async () => {
       const { data, error } = await this.supabase.auth.signUp({
@@ -79,7 +83,7 @@ export class UserManagementService extends HealthIndicator {
         throw new UnauthorizedException('Account is locked. Please try again later.');
       }
 
-      const isPasswordValid = await CommonUtils.comparePassword(password, user.password);
+      const isPasswordValid = await bcrypt.compare(password, user.password);
       if (!isPasswordValid) {
         await this.incrementLoginAttempts(user.id);
         throw new UnauthorizedException('Invalid credentials');
@@ -124,8 +128,8 @@ export class UserManagementService extends HealthIndicator {
   async getUser(token: string): Promise<any> {
     return this.retryOperation(async () => {
       const cachedUser = this.userCache.get(token);
-      if (cachedUser && cachedUser.expiry > Date.now()) {
-        return cachedUser.user;
+      if (cachedUser) {
+        return cachedUser;
       }
 
       const { data: { user }, error } = await this.supabase.auth.getUser(token);
@@ -134,10 +138,7 @@ export class UserManagementService extends HealthIndicator {
       const role = await this.getUserRole(user.id);
       const userData = { ...user, role };
 
-      this.userCache.set(token, {
-        user: userData,
-        expiry: Date.now() + this.CACHE_TTL
-      });
+      this.userCache.set(token, userData);
 
       return userData;
     });
@@ -152,55 +153,6 @@ export class UserManagementService extends HealthIndicator {
       await this.rotateRefreshToken(data.user.id, refreshToken, newRefreshToken);
 
       return { ...data, refreshToken: newRefreshToken };
-    });
-  }
-
-  async resetPassword(email: string): Promise<void> {
-    return this.retryOperation(async () => {
-      const resetToken = CommonUtils.generateRandomString(32);
-      const resetTokenExpiry = new Date(Date.now() + 3600000); // Token valid for 1 hour
-
-      const { error } = await this.supabase
-        .from('password_reset_tokens')
-        .insert({ email, token: resetToken, expires_at: resetTokenExpiry });
-
-      if (error) throw new BadRequestException(`Password reset failed: ${error.message}`);
-
-      console.log(`Password reset token for ${email}: ${resetToken}`);
-    });
-  }
-
-  async confirmResetPassword(token: string, newPassword: string): Promise<void> {
-    return this.retryOperation(async () => {
-      const { data, error } = await this.supabase
-        .from('password_reset_tokens')
-        .select('*')
-        .eq('token', token)
-        .single();
-
-      if (error || !data) throw new BadRequestException('Invalid or expired reset token');
-
-      if (new Date(data.expires_at) < new Date()) {
-        throw new BadRequestException('Reset token has expired');
-      }
-
-      if (!CommonUtils.isStrongPassword(newPassword)) {
-        throw new BadRequestException('Password does not meet strength requirements');
-      }
-
-      const hashedPassword = await CommonUtils.hashPassword(newPassword);
-
-      const { error: updateError } = await this.supabase
-        .from('users')
-        .update({ password: hashedPassword })
-        .eq('email', data.email);
-
-      if (updateError) throw new BadRequestException(`Password reset failed: ${updateError.message}`);
-
-      await this.supabase
-        .from('password_reset_tokens')
-        .delete()
-        .eq('token', token);
     });
   }
 
@@ -268,7 +220,7 @@ export class UserManagementService extends HealthIndicator {
     return this.retryOperation(async () => {
       await this.supabase
         .from('users')
-        .update({ is_locked: true, locked_until: new Date(Date.now() + 30 * 60 * 1000) }) // Lock for 30 minutes
+        .update({ is_locked: true, locked_until: new Date(Date.now() + 30 * 60 * 1000) })
         .eq('id', userId);
     });
   }
@@ -311,127 +263,29 @@ export class UserManagementService extends HealthIndicator {
     });
   }
 
-  private clearExpiredCache() {
-    const now = Date.now();
-    for (const [key, value] of this.userCache.entries()) {
-      if (value.expiry <= now) {
-        this.userCache.delete(key);
-      }
-    }
-  }
-
-  startCacheCleanup() {
-    setInterval(() => this.clearExpiredCache(), this.CACHE_TTL);
-  }
-
-  // New methods for RBAC
-
-  async assignRole(userId: string, role: string): Promise<void> {
-    return this.retryOperation(async () => {
-      const { error } = await this.supabase
-        .from('user_roles')
-        .upsert({ user_id: userId, role }, { onConflict: 'user_id' });
-
-      if (error) throw new Error(`Failed to assign role: ${error.message}`);
-    });
-  }
-
-  async getRoles(): Promise<string[]> {
-    return this.retryOperation(async () => {
-      const { data, error } = await this.supabase
-        .from('roles')
-        .select('name');
-
-      if (error) throw new Error(`Failed to get roles: ${error.message}`);
-      return data.map(role => role.name);
-    });
-  }
-
-  async createRole(roleName: string): Promise<void> {
-    return this.retryOperation(async () => {
-      const { error } = await this.supabase
-        .from('roles')
-        .insert({ name: roleName });
-
-      if (error) throw new Error(`Failed to create role: ${error.message}`);
-    });
-  }
-
-  async deleteRole(roleName: string): Promise<void> {
-    return this.retryOperation(async () => {
-      const { error } = await this.supabase
-        .from('roles')
-        .delete()
-        .eq('name', roleName);
-
-      if (error) throw new Error(`Failed to delete role: ${error.message}`);
-    });
-  }
-
-  async getUsersWithRole(role: string): Promise<any[]> {
-    return this.retryOperation(async () => {
-      const { data, error } = await this.supabase
-        .from('user_roles')
-        .select('users(*)')
-        .eq('role', role);
-
-      if (error) throw new Error(`Failed to get users with role: ${error.message}`);
-      return data.map(item => item.users);
-    });
-  }
-
   async hasPermission(userId: string, permission: string): Promise<boolean> {
-    return this.retryOperation(async () => {
-      const { data, error } = await this.supabase
-        .from('user_roles')
-        .select('roles(permissions)')
-        .eq('user_id', userId)
-        .single();
+    const { data, error } = await this.supabase
+      .from('user_roles')
+      .select('roles(permissions)')
+      .eq('user_id', userId);
 
-      if (error) throw new Error(`Failed to check permission: ${error.message}`);
-      return data.roles.permissions.includes(permission);
-    });
+    if (error) {
+      this.logger.error(`Error checking permission: ${error.message}`);
+      return false;
+    }
+
+    if (!data || data.length === 0) {
+      return false;
+    }
+
+    return data.some(role => role.roles && Array.isArray(role.roles.permissions) && role.roles.permissions.includes(permission));
   }
 
-  async addPermissionToRole(roleName: string, permission: string): Promise<void> {
-    return this.retryOperation(async () => {
-      const { data, error } = await this.supabase
-        .from('roles')
-        .select('permissions')
-        .eq('name', roleName)
-        .single();
-
-      if (error) throw new Error(`Failed to get role permissions: ${error.message}`);
-
-      const updatedPermissions = [...new Set([...data.permissions, permission])];
-
-      const { error: updateError } = await this.supabase
-        .from('roles')
-        .update({ permissions: updatedPermissions })
-        .eq('name', roleName);
-
-      if (updateError) throw new Error(`Failed to add permission to role: ${updateError.message}`);
-    });
-  }
-
-  async removePermissionFromRole(roleName: string, permission: string): Promise<void> {
-    return this.retryOperation(async () => {
-      const { data, error } = await this.supabase
-        .from('roles')
-        .select('permissions')
-        .eq('name', roleName)
-        .single();
-
-      if (error) throw new Error(`Failed to get role permissions: ${error.message}`);
-
-      const updatedPermissions = data.permissions.filter(p => p !== permission);
-
-      const { error: updateError } = await this.supabase
-        .from('roles')
-        .update({ permissions: updatedPermissions })
-        .eq('name', roleName);
-
-      if (updateError) throw new Error(`Failed to remove permission from role: ${updateError.message}`);
-    });
+  startCacheCleanup(): void {
+    setInterval(() => {
+      this.logger.log('Starting cache cleanup');
+      this.userCache.flushAll();
+      this.logger.log('Cache cleanup completed');
+    }, 600000); // Run every 10 minutes
   }
 }
