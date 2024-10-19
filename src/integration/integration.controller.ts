@@ -1,46 +1,40 @@
-import { Controller, Get, Post, Put, Delete, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { IntegrationService } from './integration.service';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { AuthGuard } from '../user-management/auth.guard';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('integration')
 @Controller('integration')
+@UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class IntegrationController {
   constructor(private readonly integrationService: IntegrationService) {}
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get a resource by ID' })
-  @ApiResponse({ status: 200, description: 'Resource found' })
-  @ApiResponse({ status: 404, description: 'Resource not found' })
-  @ApiParam({ name: 'id', type: 'string' })
-  async getResource(@Param('id') id: string) {
-    return this.integrationService.getResource(id);
+  @Get(':resourceId')
+  @ApiOperation({ summary: 'Get external data' })
+  @ApiResponse({ status: 200, description: 'External data retrieved successfully' })
+  async getExternalData(@Param('resourceId') resourceId: string) {
+    return this.integrationService.getExternalData(resourceId);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a new resource' })
-  @ApiResponse({ status: 201, description: 'Resource created' })
-  @ApiBody({ description: 'Resource data' })
-  async createResource(@Body() data: any) {
-    return this.integrationService.createResource(data);
+  @ApiOperation({ summary: 'Create external resource' })
+  @ApiResponse({ status: 201, description: 'External resource created successfully' })
+  async createExternalResource(@Body() data: any) {
+    return this.integrationService.createExternalResource(data);
   }
 
-  @Put(':id')
-  @ApiOperation({ summary: 'Update a resource' })
-  @ApiResponse({ status: 200, description: 'Resource updated' })
-  @ApiResponse({ status: 404, description: 'Resource not found' })
-  @ApiParam({ name: 'id', type: 'string' })
-  @ApiBody({ description: 'Updated resource data' })
-  async updateResource(@Param('id') id: string, @Body() data: any) {
-    return this.integrationService.updateResource(id, data);
+  @Put(':resourceId')
+  @ApiOperation({ summary: 'Update external resource' })
+  @ApiResponse({ status: 200, description: 'External resource updated successfully' })
+  async updateExternalResource(@Param('resourceId') resourceId: string, @Body() data: any) {
+    return this.integrationService.updateExternalResource(resourceId, data);
   }
 
-  @Delete(':id')
-  @ApiOperation({ summary: 'Delete a resource' })
-  @ApiResponse({ status: 204, description: 'Resource deleted' })
-  @ApiResponse({ status: 404, description: 'Resource not found' })
-  @ApiParam({ name: 'id', type: 'string' })
-  async deleteResource(@Param('id') id: string) {
-    await this.integrationService.deleteResource(id);
-    return { message: 'Resource deleted successfully' };
+  @Delete(':resourceId')
+  @ApiOperation({ summary: 'Delete external resource' })
+  @ApiResponse({ status: 200, description: 'External resource deleted successfully' })
+  async deleteExternalResource(@Param('resourceId') resourceId: string) {
+    return this.integrationService.deleteExternalResource(resourceId);
   }
 }

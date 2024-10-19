@@ -42,12 +42,9 @@ export class IntegrationService {
       });
       return this.mapApiResponse(response.data);
     } catch (error) {
-      if (error.response) {
-        this.logger.error(`API request failed: ${error.response.status} - ${error.response.data}`);
-      } else if (error.code === 'ECONNABORTED') {
-        this.logger.error('API request timed out');
-      } else {
+      if (error instanceof Error) {
         this.logger.error(`API request failed: ${error.message}`);
+        throw new Error(`API request failed: ${error.message}`);
       }
       throw error;
     }
@@ -55,29 +52,39 @@ export class IntegrationService {
 
   private mapApiResponse(data: any): any {
     // Implement your data mapping logic here
-    // This is a simple example, you should adapt it to your specific needs
-    return {
-      id: data.id,
-      name: data.name,
-      description: data.description,
-      createdAt: new Date(data.created_at),
-      updatedAt: new Date(data.updated_at),
-    };
+    // This is a simple example, adapt it to your specific needs
+    if (Array.isArray(data)) {
+      return data.map(item => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        createdAt: new Date(item.created_at),
+        updatedAt: new Date(item.updated_at),
+      }));
+    } else {
+      return {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        createdAt: new Date(data.created_at),
+        updatedAt: new Date(data.updated_at),
+      };
+    }
   }
 
-  async getResource(id: string): Promise<any> {
-    return this.makeApiRequest(`/resources/${id}`, 'GET');
+  async getExternalData(resourceId: string): Promise<any> {
+    return this.makeApiRequest(`/resources/${resourceId}`, 'GET');
   }
 
-  async createResource(data: any): Promise<any> {
+  async createExternalResource(data: any): Promise<any> {
     return this.makeApiRequest('/resources', 'POST', data);
   }
 
-  async updateResource(id: string, data: any): Promise<any> {
-    return this.makeApiRequest(`/resources/${id}`, 'PUT', data);
+  async updateExternalResource(resourceId: string, data: any): Promise<any> {
+    return this.makeApiRequest(`/resources/${resourceId}`, 'PUT', data);
   }
 
-  async deleteResource(id: string): Promise<void> {
-    await this.makeApiRequest(`/resources/${id}`, 'DELETE');
+  async deleteExternalResource(resourceId: string): Promise<any> {
+    return this.makeApiRequest(`/resources/${resourceId}`, 'DELETE');
   }
 }
