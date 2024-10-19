@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ErrorHandlingMonitoringService } from './error-handling-monitoring.service';
 import { ErrorHandlingMonitoringController } from './error-handling-monitoring.controller';
-import { ConfigModule } from '@nestjs/config';
+import { TerminusModule } from '@nestjs/terminus';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, TerminusModule],
   providers: [ErrorHandlingMonitoringService],
   controllers: [ErrorHandlingMonitoringController],
   exports: [ErrorHandlingMonitoringService],

@@ -1,46 +1,51 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as Sentry from '@sentry/node';
+import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import axios from 'axios';
-import * as crypto from 'crypto';
 
 @Injectable()
-export class ErrorHandlingMonitoringService {
-  private supabase: SupabaseClient;
+export class ErrorHandlingMonitoringService extends HealthIndicator implements OnModuleInit {
   private readonly logger = new Logger(ErrorHandlingMonitoringService.name);
-  private huggingfaceApiKey: string;
-  private huggingfaceInferenceEndpoint: string;
+  private supabase: SupabaseClient;
 
   constructor(private configService: ConfigService) {
+    super();
     this.supabase = createClient(
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
     );
-    this.huggingfaceApiKey = this.configService.get<string>('HUGGINGFACE_API_KEY');
-    this.huggingfaceInferenceEndpoint = this.configService.get<string>('HUGGINGFACE_INFERENCE_ENDPOINT');
   }
 
-  async logError(error: Error, context: string, userId?: string): Promise<void> {
+  onModuleInit() {
+    Sentry.init({
+      dsn: this.configService.get<string>('SENTRY_DSN'),
+      environment: this.configService.get<string>('NODE_ENV') || 'development',
+    });
+  }
+
+  async checkHealth(): Promise<HealthIndicatorResult> {
     try {
-      const errorId = crypto.randomUUID();
-      const { error: supabaseError } = await this.supabase.from('error_logs').insert({
-        id: errorId,
-        error_message: error.message,
-        stack_trace: error.stack,
-        context,
-        user_id: userId,
-        timestamp: new Date().toISOString(),
-      });
-
-      if (supabaseError) throw new Error(`Failed to log error: ${supabaseError.message}`);
-
-      this.logger.error(`Error logged: ${errorId} - ${error.message} in context: ${context}`);
-    } catch (loggingError) {
-      this.logger.error(`Error while logging error: ${loggingError.message}`);
+      const { data, error } = await this.supabase.from('error_logs').select('id').limit(1);
+      if (error) throw error;
+      return this.getStatus('error_handling_monitoring_db', true, { message: 'Error Handling and Monitoring DB is healthy' });
+    } catch (error) {
+      this.logger.error(`Health check failed: ${error.message}`);
+      throw new HealthCheckError('Error Handling and Monitoring DB check failed', error);
     }
   }
 
-  async getErrorLogs(page: number = 1, limit: number = 50): Promise<{ logs: any[], total: number }> {
+  captureException(error: Error, context?: any) {
+    Sentry.captureException(error, { extra: context });
+    this.logError(error, context);
+  }
+
+  captureMessage(message: string, level: Sentry.Severity = Sentry.Severity.Info, context?: any) {
+    Sentry.captureMessage(message, level);
+    this.logMessage(message, level, context);
+  }
+
+  async getErrorLogs(page: number = 1, limit: number = 10): Promise<any> {
     try {
       const { data, error, count } = await this.supabase
         .from('error_logs')
@@ -53,111 +58,76 @@ export class ErrorHandlingMonitoringService {
       return { logs: data, total: count };
     } catch (error) {
       this.logger.error(`Error fetching error logs: ${error.message}`);
-      throw new Error('Failed to fetch error logs');
+      throw error;
     }
   }
 
-  async analyzeErrors(timeRange: string): Promise<string> {
+  async getPerformanceMetrics(startDate: Date, endDate: Date): Promise<any> {
     try {
       const { data, error } = await this.supabase
-        .from('error_logs')
+        .from('performance_metrics')
         .select('*')
-        .gte('timestamp', new Date(Date.now() - this.getTimeRangeInMs(timeRange)).toISOString());
+        .gte('timestamp', startDate.toISOString())
+        .lte('timestamp', endDate.toISOString())
+        .order('timestamp', { ascending: true });
 
-      if (error) throw new Error(`Failed to fetch error logs for analysis: ${error.message}`);
+      if (error) throw new Error(`Failed to fetch performance metrics: ${error.message}`);
 
-      const analysisPrompt = `
-        Analyze the following error logs and provide insights:
-        ${JSON.stringify(data)}
-
-        Please provide:
-        1. Most common error types
-        2. Potential root causes
-        3. Recommendations for error prevention
-        4. Suggestions for improving system reliability
-        5. Any potential security concerns or vulnerabilities
-      `;
-
-      const response = await axios.post(
-        this.huggingfaceInferenceEndpoint,
-        { inputs: analysisPrompt },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.huggingfaceApiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      return response.data[0].generated_text.trim();
+      return data;
     } catch (error) {
-      this.logger.error(`Error analyzing error logs: ${error.message}`);
-      throw new Error('Failed to analyze error logs');
+      this.logger.error(`Error fetching performance metrics: ${error.message}`);
+      throw error;
     }
   }
 
-  async detectAnomalies(timeRange: string): Promise<any[]> {
+  async recordPerformanceMetric(metricName: string, value: number): Promise<void> {
     try {
-      const { data, error } = await this.supabase
-        .from('error_logs')
-        .select('*')
-        .gte('timestamp', new Date(Date.now() - this.getTimeRangeInMs(timeRange)).toISOString());
-
-      if (error) throw new Error(`Failed to fetch error logs for anomaly detection: ${error.message}`);
-
-      const errorFrequency = {};
-      const contextErrorCounts = {};
-
-      // Calculate error frequencies
-      data.forEach(log => {
-        errorFrequency[log.error_message] = (errorFrequency[log.error_message] || 0) + 1;
-        if (!contextErrorCounts[log.context]) {
-          contextErrorCounts[log.context] = {};
-        }
-        contextErrorCounts[log.context][log.error_message] = (contextErrorCounts[log.context][log.error_message] || 0) + 1;
-      });
-
-      const totalLogs = data.length;
-      const anomalies = [];
-
-      // Detect anomalies
-      Object.entries(contextErrorCounts).forEach(([context, errors]) => {
-        Object.entries(errors).forEach(([errorMessage, count]) => {
-          const averageFrequency = errorFrequency[errorMessage] / Object.keys(contextErrorCounts).length;
-          if (count > averageFrequency * 2) { // If the context's error count is more than twice the average
-            anomalies.push({
-              context,
-              errorMessage,
-              count,
-              averageFrequency,
-              severity: 'high',
-            });
-          }
+      const { error } = await this.supabase
+        .from('performance_metrics')
+        .insert({
+          metric_name: metricName,
+          value,
+          timestamp: new Date().toISOString(),
         });
-      });
 
-      return anomalies;
+      if (error) throw new Error(`Failed to record performance metric: ${error.message}`);
     } catch (error) {
-      this.logger.error(`Error detecting anomalies: ${error.message}`);
-      throw new Error('Failed to detect anomalies');
+      this.logger.error(`Error recording performance metric: ${error.message}`);
+      throw error;
     }
   }
 
-  private getTimeRangeInMs(timeRange: string): number {
-    const [amount, unit] = timeRange.split(' ');
-    const amountNum = parseInt(amount);
-    switch (unit) {
-      case 'hour':
-      case 'hours':
-        return amountNum * 60 * 60 * 1000;
-      case 'day':
-      case 'days':
-        return amountNum * 24 * 60 * 60 * 1000;
-      case 'week':
-      case 'weeks':
-        return amountNum * 7 * 24 * 60 * 60 * 1000;
-      default:
-        throw new Error('Invalid time range');
+  private async logError(error: Error, context?: any): Promise<void> {
+    try {
+      const { error: dbError } = await this.supabase
+        .from('error_logs')
+        .insert({
+          message: error.message,
+          stack: error.stack,
+          context: JSON.stringify(context),
+          timestamp: new Date().toISOString(),
+        });
+
+      if (dbError) throw new Error(`Failed to log error: ${dbError.message}`);
+    } catch (logError) {
+      this.logger.error(`Error logging to database: ${logError.message}`);
+    }
+  }
+
+  private async logMessage(message: string, level: Sentry.Severity, context?: any): Promise<void> {
+    try {
+      const { error: dbError } = await this.supabase
+        .from('message_logs')
+        .insert({
+          message,
+          level: level.toString(),
+          context: JSON.stringify(context),
+          timestamp: new Date().toISOString(),
+        });
+
+      if (dbError) throw new Error(`Failed to log message: ${dbError.message}`);
+    } catch (logError) {
+      this.logger.error(`Error logging message to database: ${logError.message}`);
     }
   }
 }

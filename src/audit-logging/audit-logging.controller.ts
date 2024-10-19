@@ -1,53 +1,52 @@
-import { Controller, Post, Body, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { AuditLoggingService } from './audit-logging.service';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '../user-management/auth.guard';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 
 @ApiTags('audit-logging')
 @Controller('audit-logging')
 @UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class AuditLoggingController {
-  constructor(private readonly auditLoggingService: AuditLoggingService) {}
+  constructor(
+    private readonly auditLoggingService: AuditLoggingService,
+    private health: HealthCheckService
+  ) {}
 
-  @Post('log')
-  @ApiOperation({ summary: 'Log an action' })
-  @ApiResponse({ status: 201, description: 'Action logged successfully' })
-  async logAction(
-    @Body('userId') userId: string,
-    @Body('action') action: string,
-    @Body('details') details: any,
-  ) {
-    await this.auditLoggingService.logAction(userId, action, details);
-    return { message: 'Action logged successfully' };
+  @Post('log-activity')
+  @ApiOperation({ summary: 'Log an activity' })
+  @ApiResponse({ status: 201, description: 'Activity logged successfully' })
+  async logActivity(@Body() activityData: { userId: string; action: string; details: any }) {
+    await this.auditLoggingService.logActivity(activityData.userId, activityData.action, activityData.details);
+    return { message: 'Activity logged successfully' };
   }
 
-  @Get('logs')
-  @ApiOperation({ summary: 'Get audit logs' })
-  @ApiResponse({ status: 200, description: 'Returns audit logs' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  async getAuditLogs(
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 50,
-  ) {
-    return this.auditLoggingService.getAuditLogs(page, limit);
+  @Get('audit-trail')
+  @ApiOperation({ summary: 'Generate audit trail' })
+  @ApiResponse({ status: 200, description: 'Audit trail generated successfully' })
+  async generateAuditTrail(@Query('startDate') startDate: string, @Query('endDate') endDate: string) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    return this.auditLoggingService.generateAuditTrail(start, end);
   }
 
-  @Get('analyze')
-  @ApiOperation({ summary: 'Analyze audit logs' })
-  @ApiResponse({ status: 200, description: 'Returns analysis of audit logs' })
-  @ApiQuery({ name: 'timeRange', required: true, type: String, description: 'Time range for analysis (e.g., "1 day", "1 week")' })
-  async analyzeAuditLogs(@Query('timeRange') timeRange: string) {
-    const analysis = await this.auditLoggingService.analyzeAuditLogs(timeRange);
-    return { analysis };
+  @Post('create-alert')
+  @ApiOperation({ summary: 'Create an alert' })
+  @ApiResponse({ status: 201, description: 'Alert created successfully' })
+  async createAlert(@Body() alertData: { type: string; message: string; severity: 'low' | 'medium' | 'high' }) {
+    await this.auditLoggingService.createAlert(alertData.type, alertData.message, alertData.severity);
+    return { message: 'Alert created successfully' };
   }
 
-  @Get('anomalies')
-  @ApiOperation({ summary: 'Detect anomalies in audit logs' })
-  @ApiResponse({ status: 200, description: 'Returns detected anomalies in audit logs' })
-  @ApiQuery({ name: 'timeRange', required: true, type: String, description: 'Time range for anomaly detection (e.g., "1 day", "1 week")' })
-  async detectAnomalies(@Query('timeRange') timeRange: string) {
-    const anomalies = await this.auditLoggingService.detectAnomalies(timeRange);
-    return { anomalies };
+  @Get('health')
+  @HealthCheck()
+  @ApiOperation({ summary: 'Check the health of the Audit and Logging service' })
+  @ApiResponse({ status: 200, description: 'Service is healthy' })
+  @ApiResponse({ status: 503, description: 'Service is unhealthy' })
+  async checkHealth() {
+    return this.health.check([
+      () => this.auditLoggingService.checkHealth(),
+    ]);
   }
 }
