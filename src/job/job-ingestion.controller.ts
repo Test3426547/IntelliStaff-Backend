@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards } from '@nestjs/common';
 import { JobIngestionService } from './job-ingestion.service';
 import { AuthGuard } from '../user-management/auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
@@ -18,5 +18,19 @@ export class JobIngestionController {
     return { message: `${jobs.length} jobs scraped and ingested successfully`, jobs };
   }
 
-  // ... (keep other existing methods)
+  @Get('job')
+  @ApiOperation({ summary: 'Get a job by ID' })
+  @ApiResponse({ status: 200, description: 'Job retrieved successfully' })
+  async getJob(@Query('id') id: string) {
+    const job = await this.jobIngestionService.getJobById(id);
+    return job ? job : { message: 'Job not found' };
+  }
+
+  @Get('jobs')
+  @ApiOperation({ summary: 'List jobs' })
+  @ApiResponse({ status: 200, description: 'Jobs listed successfully' })
+  async listJobs(@Query('page') page: number = 1, @Query('limit') limit: number = 10) {
+    const { jobs, total } = await this.jobIngestionService.listJobs(page, limit);
+    return { jobs, total, page, limit };
+  }
 }
