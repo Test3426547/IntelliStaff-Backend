@@ -87,4 +87,17 @@ export class IntegrationService {
   async deleteExternalResource(resourceId: string): Promise<any> {
     return this.makeApiRequest(`/resources/${resourceId}`, 'DELETE');
   }
+
+  async relistJobOnExternalPlatforms(job: any): Promise<any> {
+    try {
+      // Implement the logic to relist the job on external platforms
+      // This is a placeholder implementation
+      const relistingResult = await this.makeApiRequest('/relist-job', 'POST', job);
+      this.logger.log(`Job ${job.id} relisted on external platforms`);
+      return relistingResult;
+    } catch (error) {
+      this.logger.error(`Error relisting job ${job.id} on external platforms: ${error.message}`);
+      throw error;
+    }
+  }
 }

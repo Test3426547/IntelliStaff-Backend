@@ -2,7 +2,7 @@ import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
-import * as NodeCache from 'node-cache';
+import NodeCache from 'node-cache';
 import axios from 'axios';
 
 @Injectable()

@@ -9,26 +9,26 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const token = this.extractTokenFromHeader(request);
     if (!token) {
-      throw new UnauthorizedException('Missing authentication token');
+      throw new UnauthorizedException();
     }
     try {
       const user = await this.userManagementService.getUser(token);
       
-      // Check if 2FA is enabled and verified
+      // Check if 2FA is required
       if (user.two_factor_enabled) {
         const twoFactorToken = request.headers['x-2fa-token'];
         if (!twoFactorToken) {
-          throw new UnauthorizedException('2FA token is required');
+          throw new UnauthorizedException('Two-factor authentication token required');
         }
-        const isValid = await this.userManagementService.verify2FA(user.id, twoFactorToken);
+        const isValid = await this.userManagementService.verify2FAToken(user.two_factor_secret, twoFactorToken);
         if (!isValid) {
-          throw new UnauthorizedException('Invalid 2FA token');
+          throw new UnauthorizedException('Invalid two-factor authentication token');
         }
       }
-
+      
       request['user'] = user;
-    } catch (error) {
-      throw new UnauthorizedException('Invalid authentication token');
+    } catch {
+      throw new UnauthorizedException();
     }
     return true;
   }

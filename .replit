@@ -31,6 +31,14 @@ args = "Resume Ingestion Test"
 task = "workflow.run"
 args = "Test Job Ingestion"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Test LinkedIn Scraper"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Test LinkedIn Job Ingestion"
+
 [[workflows.workflow]]
 name = "Start NestJS Server"
 author = "agent"
@@ -86,6 +94,28 @@ agentRequireRestartOnSave = false
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx ts-node src/test-job-ingestion.ts"
+
+[[workflows.workflow]]
+name = "Test LinkedIn Scraper"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node src/job/test-linkedin-scraper.js"
+
+[[workflows.workflow]]
+name = "Test LinkedIn Job Ingestion"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx -y ts-node src/job/test-job-ingestion.ts"
 
 [deployment]
 run = ["sh", "-c", "cd ai-recruitment-platform && npm run start:dev, ./start.sh"]

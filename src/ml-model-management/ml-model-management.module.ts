@@ -13,9 +13,4 @@ import { ScheduleModule } from '@nestjs/schedule';
   controllers: [MlModelManagementController],
   exports: [MlModelManagementService],
 })
-export class MlModelManagementModule {
-  constructor(private mlModelManagementService: MlModelManagementService) {
-    // Start the cache cleanup interval when the module is initialized
-    this.mlModelManagementService.startCacheCleanupInterval();
-  }
-}
+export class MlModelManagementModule {}

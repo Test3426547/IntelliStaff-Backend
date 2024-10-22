@@ -74,7 +74,7 @@ export class JobIngestionService {
           const { data, error } = await this.supabase.from('jobs').insert(job).select();
           if (error) {
             this.logger.error(`Failed to save job: ${error.message}`);
-          } else {
+          } else if (data && data.length > 0) {
             this.logger.log(`Job saved successfully: ${job.title} at ${job.company}`);
             savedJobs++;
             savedJobIds.push(data[0].id);

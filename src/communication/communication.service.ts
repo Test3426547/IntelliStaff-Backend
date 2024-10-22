@@ -2,11 +2,11 @@ import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
-import { retry } from 'rxjs/operators';
-import { from } from 'rxjs';
+import { retry, catchError } from 'rxjs/operators';
+import { from, Observable, throwError } from 'rxjs';
 import * as admin from 'firebase-admin';
 import * as sgMail from '@sendgrid/mail';
-import * as twilio from 'twilio';
+import { Twilio } from 'twilio';
 import * as Handlebars from 'handlebars';
 import { Cron } from '@nestjs/schedule';
 
@@ -15,7 +15,7 @@ export class CommunicationService extends HealthIndicator {
   private supabase: SupabaseClient;
   private readonly logger = new Logger(CommunicationService.name);
   private firebaseApp: admin.app.App;
-  private twilioClient: twilio.Twilio;
+  private twilioClient: Twilio;
   private messageTemplates: Map<string, Handlebars.TemplateDelegate> = new Map();
   private scheduledCommunications: any[] = [];
 
@@ -49,7 +49,7 @@ export class CommunicationService extends HealthIndicator {
   private initializeTwilio() {
     const accountSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
     const authToken = this.configService.get<string>('TWILIO_AUTH_TOKEN');
-    this.twilioClient = twilio(accountSid, authToken);
+    this.twilioClient = new Twilio(accountSid, authToken);
   }
 
   private initializeMessageTemplates() {
@@ -74,147 +74,108 @@ export class CommunicationService extends HealthIndicator {
     }
   }
 
-  private async retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
+  private retryOperation<T>(operation: () => Promise<T>, maxRetries: number = 3): Observable<T> {
     return from(operation()).pipe(
       retry({
         count: maxRetries,
         delay: (error, retryCount) => {
           this.logger.warn(`Retrying operation. Attempt ${retryCount} of ${maxRetries}`);
-          return Math.pow(2, retryCount) * 1000; // Exponential backoff
+          return from(new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000)));
         }
+      }),
+      catchError((error) => {
+        this.logger.error(`Operation failed after ${maxRetries} retries: ${error.message}`);
+        return throwError(() => new Error(`Operation failed after ${maxRetries} retries: ${error.message}`));
       })
-    ).toPromise();
+    );
   }
 
   async sendEmail(to: string, subject: string, templateName: string, context: any): Promise<void> {
-    return this.retryOperation(async () => {
-      try {
-        const template = this.messageTemplates.get(templateName);
-        if (!template) {
-          throw new Error(`Template ${templateName} not found`);
-        }
-
-        const body = template(context);
-        const msg = {
-          to,
-          from: this.configService.get<string>('EMAIL_FROM'),
-          subject,
-          text: body,
-          html: body,
-        };
-        await sgMail.send(msg);
-        this.logger.log(`Email sent to ${to}`);
-        await this.logCommunication(to, 'email', { subject, templateName, context });
-      } catch (error) {
-        this.logger.error(`Error sending email: ${error.message}`);
-        throw new InternalServerErrorException('Failed to send email');
-      }
-    });
+    const template = this.messageTemplates.get(templateName);
+    if (!template) {
+      throw new Error(`Template ${templateName} not found`);
+    }
+    const html = template(context);
+    const msg = {
+      to,
+      from: this.configService.get<string>('EMAIL_FROM'),
+      subject,
+      html,
+    };
+    try {
+      await sgMail.send(msg);
+      this.logger.log(`Email sent to ${to}`);
+    } catch (error) {
+      this.logger.error(`Failed to send email: ${error.message}`);
+      throw new InternalServerErrorException('Failed to send email');
+    }
   }
 
   async sendSMS(to: string, templateName: string, context: any): Promise<void> {
-    return this.retryOperation(async () => {
-      try {
-        const template = this.messageTemplates.get(templateName);
-        if (!template) {
-          throw new Error(`Template ${templateName} not found`);
-        }
-
-        const body = template(context);
-        const message = await this.twilioClient.messages.create({
-          body,
-          from: this.configService.get<string>('TWILIO_PHONE_NUMBER'),
-          to,
-        });
-        this.logger.log(`SMS sent to ${to}, SID: ${message.sid}`);
-        await this.logCommunication(to, 'sms', { templateName, context });
-      } catch (error) {
-        this.logger.error(`Error sending SMS: ${error.message}`);
-        throw new InternalServerErrorException('Failed to send SMS');
-      }
-    });
+    const template = this.messageTemplates.get(templateName);
+    if (!template) {
+      throw new Error(`Template ${templateName} not found`);
+    }
+    const message = template(context);
+    try {
+      await this.twilioClient.messages.create({
+        body: message,
+        from: this.configService.get<string>('TWILIO_PHONE_NUMBER'),
+        to,
+      });
+      this.logger.log(`SMS sent to ${to}`);
+    } catch (error) {
+      this.logger.error(`Failed to send SMS: ${error.message}`);
+      throw new InternalServerErrorException('Failed to send SMS');
+    }
   }
 
   async sendPushNotification(userId: string, templateName: string, context: any): Promise<void> {
-    return this.retryOperation(async () => {
-      try {
-        const { data, error } = await this.supabase
-          .from('user_devices')
-          .select('fcm_token')
-          .eq('user_id', userId)
-          .single();
-
-        if (error || !data) {
-          throw new Error('FCM token not found for user');
-        }
-
-        const template = this.messageTemplates.get(templateName);
-        if (!template) {
-          throw new Error(`Template ${templateName} not found`);
-        }
-
-        const { title, body } = JSON.parse(template(context));
-
-        const message = {
-          notification: { title, body },
-          token: data.fcm_token,
-        };
-
-        await this.firebaseApp.messaging().send(message);
-        this.logger.log(`Push notification sent to user ${userId}`);
-        await this.logCommunication(userId, 'push_notification', { templateName, context });
-      } catch (error) {
-        this.logger.error(`Error sending push notification: ${error.message}`);
-        throw new InternalServerErrorException('Failed to send push notification');
-      }
-    });
+    const template = this.messageTemplates.get(templateName);
+    if (!template) {
+      throw new Error(`Template ${templateName} not found`);
+    }
+    const message = template(context);
+    try {
+      await this.firebaseApp.messaging().send({
+        token: userId,
+        notification: {
+          title: context.title,
+          body: message,
+        },
+      });
+      this.logger.log(`Push notification sent to ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to send push notification: ${error.message}`);
+      throw new InternalServerErrorException('Failed to send push notification');
+    }
   }
 
-  async logCommunication(recipientId: string, type: string, details: any): Promise<void> {
-    return this.retryOperation(async () => {
-      try {
-        const { error } = await this.supabase.from('communications').insert({
-          recipient_id: recipientId,
-          type,
-          details,
-          timestamp: new Date().toISOString(),
-        });
+  async getCommunicationHistory(recipientId: string, page: number, limit: number): Promise<any> {
+    try {
+      const { data, error, count } = await this.supabase
+        .from('communications')
+        .select('*', { count: 'exact' })
+        .eq('recipient_id', recipientId)
+        .range((page - 1) * limit, page * limit - 1)
+        .order('timestamp', { ascending: false });
 
-        if (error) throw new Error(`Failed to log communication: ${error.message}`);
-      } catch (error) {
-        this.logger.error(`Error logging communication: ${error.message}`);
-        throw new InternalServerErrorException('Failed to log communication');
-      }
-    });
-  }
+      if (error) throw error;
 
-  async getCommunicationHistory(recipientId: string, page: number = 1, limit: number = 10): Promise<any> {
-    return this.retryOperation(async () => {
-      try {
-        const { data, error, count } = await this.supabase
-          .from('communications')
-          .select('*', { count: 'exact' })
-          .eq('recipient_id', recipientId)
-          .order('timestamp', { ascending: false })
-          .range((page - 1) * limit, page * limit - 1);
-
-        if (error) throw new Error(`Failed to fetch communication history: ${error.message}`);
-
-        return { history: data, total: count };
-      } catch (error) {
-        this.logger.error(`Error fetching communication history: ${error.message}`);
-        throw new InternalServerErrorException('Failed to fetch communication history');
-      }
-    });
+      return { data, total: count };
+    } catch (error) {
+      this.logger.error(`Failed to get communication history: ${error.message}`);
+      throw new InternalServerErrorException('Failed to get communication history');
+    }
   }
 
   async addMessageTemplate(name: string, template: string): Promise<void> {
     try {
       const compiledTemplate = Handlebars.compile(template);
       this.messageTemplates.set(name, compiledTemplate);
-      this.logger.log(`Message template '${name}' added successfully`);
+      this.logger.log(`Message template ${name} added successfully`);
     } catch (error) {
-      this.logger.error(`Error adding message template: ${error.message}`);
+      this.logger.error(`Failed to add message template: ${error.message}`);
       throw new InternalServerErrorException('Failed to add message template');
     }
   }
@@ -222,45 +183,40 @@ export class CommunicationService extends HealthIndicator {
   async removeMessageTemplate(name: string): Promise<void> {
     if (this.messageTemplates.has(name)) {
       this.messageTemplates.delete(name);
-      this.logger.log(`Message template '${name}' removed successfully`);
+      this.logger.log(`Message template ${name} removed successfully`);
     } else {
-      this.logger.warn(`Message template '${name}' not found`);
+      throw new Error(`Template ${name} not found`);
     }
   }
 
-  // New method for batch communication sending
-  async sendBatchCommunication(type: 'email' | 'sms' | 'push_notification', recipients: string[], templateName: string, context: any): Promise<void> {
-    const sendMethod = {
-      email: this.sendEmail.bind(this),
-      sms: this.sendSMS.bind(this),
-      push_notification: this.sendPushNotification.bind(this),
-    }[type];
-
-    if (!sendMethod) {
-      throw new Error(`Invalid communication type: ${type}`);
-    }
-
-    const batchSize = 100; // Adjust based on rate limits of your communication services
-    for (let i = 0; i < recipients.length; i += batchSize) {
-      const batch = recipients.slice(i, i + batchSize);
-      await Promise.all(batch.map(recipient => sendMethod(recipient, templateName, context)));
+  async sendBatchCommunication(type: string, recipients: string[], templateName: string, context: any): Promise<void> {
+    for (const recipient of recipients) {
+      try {
+        switch (type) {
+          case 'email':
+            await this.sendEmail(recipient, context.subject, templateName, context);
+            break;
+          case 'sms':
+            await this.sendSMS(recipient, templateName, context);
+            break;
+          case 'push':
+            await this.sendPushNotification(recipient, templateName, context);
+            break;
+          default:
+            throw new Error(`Invalid communication type: ${type}`);
+        }
+      } catch (error) {
+        this.logger.error(`Failed to send ${type} to ${recipient}: ${error.message}`);
+      }
     }
   }
 
-  // New method for scheduling communications
-  async scheduleCommunication(type: 'email' | 'sms' | 'push_notification', recipient: string, templateName: string, context: any, scheduledTime: Date): Promise<void> {
-    this.scheduledCommunications.push({
-      type,
-      recipient,
-      templateName,
-      context,
-      scheduledTime,
-    });
+  async scheduleCommunication(type: string, recipient: string, templateName: string, context: any, scheduledTime: Date): Promise<void> {
+    this.scheduledCommunications.push({ type, recipient, templateName, context, scheduledTime });
     this.logger.log(`Communication scheduled for ${recipient} at ${scheduledTime}`);
   }
 
-  // Cron job to process scheduled communications
-  @Cron('* * * * *') // Runs every minute
+  @Cron('0 * * * * *') // Run every minute
   async processScheduledCommunications() {
     const now = new Date();
     const communicationsToSend = this.scheduledCommunications.filter(comm => comm.scheduledTime <= now);
@@ -269,64 +225,36 @@ export class CommunicationService extends HealthIndicator {
       try {
         switch (comm.type) {
           case 'email':
-            await this.sendEmail(comm.recipient, 'Scheduled Email', comm.templateName, comm.context);
+            await this.sendEmail(comm.recipient, comm.context.subject, comm.templateName, comm.context);
             break;
           case 'sms':
             await this.sendSMS(comm.recipient, comm.templateName, comm.context);
             break;
-          case 'push_notification':
+          case 'push':
             await this.sendPushNotification(comm.recipient, comm.templateName, comm.context);
             break;
         }
         this.logger.log(`Scheduled communication sent to ${comm.recipient}`);
       } catch (error) {
-        this.logger.error(`Error sending scheduled communication: ${error.message}`);
+        this.logger.error(`Failed to send scheduled communication: ${error.message}`);
       }
     }
 
-    // Remove sent communications from the schedule
     this.scheduledCommunications = this.scheduledCommunications.filter(comm => comm.scheduledTime > now);
   }
 
-  // New method for managing communication preferences
-  async updateCommunicationPreferences(userId: string, preferences: { email: boolean, sms: boolean, push_notifications: boolean }): Promise<void> {
-    return this.retryOperation(async () => {
-      try {
-        const { error } = await this.supabase
-          .from('user_preferences')
-          .upsert({ user_id: userId, ...preferences }, { onConflict: 'user_id' });
+  async updateCommunicationPreferences(userId: string, preferences: any): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .from('user_communication_preferences')
+        .upsert({ user_id: userId, ...preferences });
 
-        if (error) throw new Error(`Failed to update communication preferences: ${error.message}`);
-        this.logger.log(`Communication preferences updated for user ${userId}`);
-      } catch (error) {
-        this.logger.error(`Error updating communication preferences: ${error.message}`);
-        throw new InternalServerErrorException('Failed to update communication preferences');
-      }
-    });
-  }
+      if (error) throw error;
 
-  // New method for checking communication preferences before sending
-  private async checkCommunicationPreferences(userId: string, type: 'email' | 'sms' | 'push_notification'): Promise<boolean> {
-    const { data, error } = await this.supabase
-      .from('user_preferences')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (error) {
-      this.logger.error(`Error fetching communication preferences: ${error.message}`);
-      return true; // Default to allowing communication if preferences can't be fetched
-    }
-
-    switch (type) {
-      case 'email':
-        return data.email;
-      case 'sms':
-        return data.sms;
-      case 'push_notification':
-        return data.push_notifications;
-      default:
-        return true;
+      this.logger.log(`Communication preferences updated for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to update communication preferences: ${error.message}`);
+      throw new InternalServerErrorException('Failed to update communication preferences');
     }
   }
 }

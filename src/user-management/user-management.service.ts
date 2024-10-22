@@ -266,7 +266,7 @@ export class UserManagementService extends HealthIndicator {
   async hasPermission(userId: string, permission: string): Promise<boolean> {
     const { data, error } = await this.supabase
       .from('user_roles')
-      .select('roles(permissions)')
+      .select('role')
       .eq('user_id', userId);
 
     if (error) {
@@ -278,7 +278,20 @@ export class UserManagementService extends HealthIndicator {
       return false;
     }
 
-    return data.some(role => role.roles && Array.isArray(role.roles.permissions) && role.roles.permissions.includes(permission));
+    const roles = data.map(item => item.role);
+    const { data: roleData, error: roleError } = await this.supabase
+      .from('roles')
+      .select('permissions')
+      .in('name', roles);
+
+    if (roleError) {
+      this.logger.error(`Error fetching role permissions: ${roleError.message}`);
+      return false;
+    }
+
+    return roleData.some(role => 
+      role.permissions && Array.isArray(role.permissions) && role.permissions.includes(permission)
+    );
   }
 
   startCacheCleanup(): void {
@@ -287,5 +300,61 @@ export class UserManagementService extends HealthIndicator {
       this.userCache.flushAll();
       this.logger.log('Cache cleanup completed');
     }, 600000); // Run every 10 minutes
+  }
+
+  async resetPassword(email: string): Promise<void> {
+    this.logger.log(`Password reset requested for email: ${email}`);
+    // Implement password reset logic
+    // Send password reset email
+  }
+
+  async confirmResetPassword(token: string, newPassword: string): Promise<void> {
+    this.logger.log(`Confirming password reset for token: ${token}`);
+    // Implement password reset confirmation logic
+    // Verify token and update password
+  }
+
+  async assignRole(userId: string, role: string): Promise<void> {
+    this.logger.log(`Assigning role ${role} to user ${userId}`);
+    // Implement role assignment logic
+    // Update user's role in the database
+  }
+
+  async getRoles(): Promise<string[]> {
+    this.logger.log('Fetching all roles');
+    // Implement get roles logic
+    // Fetch and return all available roles
+    return ['admin', 'user', 'manager']; // Example roles
+  }
+
+  async createRole(roleName: string): Promise<void> {
+    this.logger.log(`Creating new role: ${roleName}`);
+    // Implement create role logic
+    // Add new role to the database
+  }
+
+  async deleteRole(roleName: string): Promise<void> {
+    this.logger.log(`Deleting role: ${roleName}`);
+    // Implement delete role logic
+    // Remove role from the database
+  }
+
+  async getUsersWithRole(role: string): Promise<any[]> {
+    this.logger.log(`Fetching users with role: ${role}`);
+    // Implement get users with role logic
+    // Fetch and return users with the specified role
+    return []; // Placeholder
+  }
+
+  async addPermissionToRole(roleName: string, permission: string): Promise<void> {
+    this.logger.log(`Adding permission ${permission} to role ${roleName}`);
+    // Implement add permission to role logic
+    // Add permission to the specified role in the database
+  }
+
+  async removePermissionFromRole(roleName: string, permission: string): Promise<void> {
+    this.logger.log(`Removing permission ${permission} from role ${roleName}`);
+    // Implement remove permission from role logic
+    // Remove permission from the specified role in the database
   }
 }

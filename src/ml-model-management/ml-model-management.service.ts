@@ -105,7 +105,7 @@ export class MlModelManagementService extends HealthIndicator {
       const model = await this.getCachedModel(modelId);
       const inputTensor = tf.tensor(inputData);
       const output = model.predict(inputTensor);
-      return output.arraySync();
+      return this.tensorToArray(output);
     } catch (error) {
       this.logger.error(`Error running inference: ${error.message}`);
       throw new InternalServerErrorException('Failed to run inference');
@@ -172,8 +172,8 @@ export class MlModelManagementService extends HealthIndicator {
       const outputA = modelA.predict(inputTensor);
       const outputB = modelB.predict(inputTensor);
 
-      const resultA = outputA.arraySync();
-      const resultB = outputB.arraySync();
+      const resultA = this.tensorToArray(outputA);
+      const resultB = this.tensorToArray(outputB);
 
       return { modelA: resultA, modelB: resultB };
     } catch (error) {
@@ -253,6 +253,14 @@ export class MlModelManagementService extends HealthIndicator {
     } catch (error) {
       this.logger.error(`Error comparing model versions: ${error.message}`);
       throw new InternalServerErrorException('Failed to compare model versions');
+    }
+  }
+
+  private tensorToArray(tensor: tf.Tensor | tf.Tensor[]): any {
+    if (Array.isArray(tensor)) {
+      return tensor.map(t => t.arraySync());
+    } else {
+      return tensor.arraySync();
     }
   }
 }

@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { JobProcessingService } from './job-processing.service';
-const { scrapeLinkedInJob, scrapeLinkedInJobs, scrapeLinkedInCompany } = require('./linkedin-scraper');
+import axios, { AxiosError } from 'axios';
 
-interface JobData {
+export interface JobData {
   id: string;
   title: string;
   company: string;
@@ -13,7 +13,6 @@ interface JobData {
   posted_date: string;
   job_type: string;
   applicants: string;
-  salary: string;
   skills: string[];
   source_url: string;
 }
@@ -22,6 +21,11 @@ interface JobData {
 export class JobIngestionService {
   private supabase: SupabaseClient;
   private readonly logger = new Logger(JobIngestionService.name);
+  private lastScrapeTime: number = 0;
+  private readonly RATE_LIMIT_DELAY: number;
+  private readonly MAX_RETRIES: number;
+  private readonly SCRAPINGDOG_API_KEY: string;
+  private readonly SCRAPINGDOG_API_URL: string = 'https://api.scrapingdog.com/linkedinjobs';
 
   constructor(
     private configService: ConfigService,
@@ -31,65 +35,113 @@ export class JobIngestionService {
       this.configService.get<string>('SUPABASE_URL'),
       this.configService.get<string>('SUPABASE_KEY'),
     );
+    this.RATE_LIMIT_DELAY = this.configService.get<number>('RATE_LIMIT_DELAY') || 60000;
+    this.MAX_RETRIES = this.configService.get<number>('MAX_RETRIES') || 3;
+    this.SCRAPINGDOG_API_KEY = this.configService.get<string>('SCRAPINGDOG_API_KEY');
+    if (!this.SCRAPINGDOG_API_KEY) {
+      throw new Error('SCRAPINGDOG_API_KEY is not set in the environment');
+    }
     this.logger.log('JobIngestionService initialized');
   }
 
-  async scrapeAndIngestLinkedInJobs(searchUrl: string, limit: number = 10): Promise<JobData[]> {
-    this.logger.log(`Starting to scrape and ingest LinkedIn jobs from: ${searchUrl}`);
-    this.logger.debug(`Scraping limit set to: ${limit} jobs`);
+  private async enforceRateLimit() {
+    const now = Date.now();
+    const timeSinceLastScrape = now - this.lastScrapeTime;
+    if (timeSinceLastScrape < this.RATE_LIMIT_DELAY) {
+      const waitTime = this.RATE_LIMIT_DELAY - timeSinceLastScrape;
+      this.logger.log(`Rate limiting: Waiting for ${waitTime}ms before next scrape`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    this.lastScrapeTime = Date.now();
+  }
+
+  async scrapeAndIngestLinkedInJobs(jobId: string): Promise<JobData> {
+    this.logger.log(`Starting to scrape and ingest LinkedIn job with ID: ${jobId}`);
     try {
-      this.logger.debug(`Attempting to scrape ${limit} jobs from LinkedIn`);
+      await this.enforceRateLimit();
+      
       const startTime = Date.now();
-      const jobs = await scrapeLinkedInJobs(searchUrl, limit);
+      const job = await this.scrapeLinkedInJob(jobId);
       const endTime = Date.now();
-      this.logger.log(`Successfully scraped ${jobs.length} jobs from LinkedIn in ${endTime - startTime}ms`);
+      this.logger.log(`Successfully scraped job from LinkedIn in ${endTime - startTime}ms`);
 
-      const insertedJobs: JobData[] = [];
+      const insertedJob = await this.insertJob(job);
 
-      for (const job of jobs) {
-        try {
-          this.logger.debug(`Processing job: ${job.title} at ${job.company}`);
-          this.logger.verbose(`Job details: ${JSON.stringify(job)}`);
+      this.logScrapingStats(startTime, Date.now(), 1, insertedJob ? 1 : 0);
+      return insertedJob;
+    } catch (error) {
+      this.logger.error(`Error scraping and ingesting LinkedIn job: ${error.message}`);
+      throw new HttpException('Failed to scrape and ingest LinkedIn job', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
 
-          const { data, error } = await this.supabase
-            .from('jobs')
-            .insert({
-              title: job.title,
-              company: job.company,
-              location: job.location,
-              description: job.description,
-              posted_date: job.postedDate,
-              job_type: job.jobType,
-              applicants: job.applicants,
-              salary: job.salary,
-              skills: job.skills,
-              source_url: job.url,
-            })
-            .single();
+  private async scrapeLinkedInJob(jobId: string): Promise<JobData> {
+    this.logger.log(`Scraping LinkedIn job with ID: ${jobId}`);
+    try {
+      const response = await axios.get(this.SCRAPINGDOG_API_URL, {
+        params: {
+          api_key: this.SCRAPINGDOG_API_KEY,
+          job_id: jobId,
+        },
+      });
 
-          if (error) {
-            this.logger.error(`Failed to insert job: ${error.message}`, error.stack);
-            this.logger.verbose(`Failed job data: ${JSON.stringify(job)}`);
-            continue;
-          }
-
-          const insertedJob = data as JobData;
-          insertedJobs.push(insertedJob);
-          this.logger.debug(`Job inserted successfully. ID: ${insertedJob.id}`);
-
-          this.logger.debug(`Triggering job processing for job ID: ${insertedJob.id}`);
-          await this.jobProcessingService.processJob(insertedJob.id);
-          this.logger.debug(`Job processing completed for job ID: ${insertedJob.id}`);
-        } catch (error) {
-          this.logger.error(`Error processing job: ${error.message}`, error.stack);
-          this.logger.verbose(`Error occurred while processing job: ${JSON.stringify(job)}`);
-        }
+      if (response.status !== 200) {
+        throw new HttpException(`ScrapingDog API returned status code ${response.status}`, HttpStatus.BAD_GATEWAY);
+      }
+      if (!response.data || response.data.length === 0) {
+        throw new HttpException('No job data returned from ScrapingDog API', HttpStatus.NOT_FOUND);
       }
 
-      this.logger.log(`Successfully inserted ${insertedJobs.length} out of ${jobs.length} scraped jobs into the database`);
-      return insertedJobs;
+      this.logger.log(`Successfully scraped job data for job ID: ${jobId}`);
+      return this.mapScrapedDataToJobData(response.data[0]);
     } catch (error) {
-      this.logger.error(`Error scraping and ingesting LinkedIn jobs: ${error.message}`, error.stack);
+      if (axios.isAxiosError(error)) {
+        if (error.response) {
+          this.logger.error(`ScrapingDog API error: ${error.response.status} - ${error.response.statusText}`);
+          throw new HttpException(`ScrapingDog API error: ${error.response.status} - ${error.response.statusText}`, HttpStatus.BAD_GATEWAY);
+        } else if (error.request) {
+          this.logger.error('No response received from ScrapingDog API');
+          throw new HttpException('No response received from ScrapingDog API', HttpStatus.GATEWAY_TIMEOUT);
+        }
+      }
+      this.logger.error(`Error scraping LinkedIn job: ${error.message}`);
+      throw new HttpException('Error scraping LinkedIn job', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  private mapScrapedDataToJobData(scrapedData: any): JobData {
+    return {
+      id: scrapedData.job_id || '',
+      title: scrapedData.job_position || '',
+      company: scrapedData.company_name || '',
+      location: scrapedData.job_location || '',
+      description: scrapedData.job_description || '',
+      posted_date: scrapedData.job_posting_time || '',
+      job_type: scrapedData.Employment_type || '',
+      applicants: scrapedData.applicants || '',
+      skills: scrapedData.Industries ? scrapedData.Industries.split(',').map(s => s.trim()) : [],
+      source_url: scrapedData.job_apply_link || '',
+    };
+  }
+
+  private async insertJob(job: JobData): Promise<JobData | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from('jobs')
+        .insert(job)
+        .single();
+
+      if (error) {
+        this.logger.error(`Failed to insert job: ${error.message}`);
+        return null;
+      }
+
+      const insertedJob = data as JobData;
+      this.logger.debug(`Job inserted successfully. ID: ${insertedJob.id}`);
+      await this.jobProcessingService.processJob(insertedJob.id);
+      return insertedJob;
+    } catch (error) {
+      this.logger.error(`Error inserting job: ${error.message}`);
       throw error;
     }
   }
@@ -109,10 +161,9 @@ export class JobIngestionService {
       }
 
       this.logger.debug(`Successfully fetched job with ID: ${jobId}`);
-      this.logger.verbose(`Job data: ${JSON.stringify(data)}`);
       return data as JobData;
     } catch (error) {
-      this.logger.error(`Error fetching job: ${error.message}`, error.stack);
+      this.logger.error(`Error fetching job: ${error.message}`);
       return null;
     }
   }
@@ -135,15 +186,13 @@ export class JobIngestionService {
       }
 
       this.logger.debug(`Successfully listed ${data.length} jobs. Total count: ${count}. Query time: ${endTime - startTime}ms`);
-      this.logger.verbose(`Job list data: ${JSON.stringify(data)}`);
       return { jobs: data as JobData[], total: count || 0 };
     } catch (error) {
-      this.logger.error(`Error listing jobs: ${error.message}`, error.stack);
+      this.logger.error(`Error listing jobs: ${error.message}`);
       return { jobs: [], total: 0 };
     }
   }
 
-  // New method to log scraping statistics
   private logScrapingStats(startTime: number, endTime: number, totalJobs: number, successfulJobs: number): void {
     const duration = endTime - startTime;
     const successRate = (successfulJobs / totalJobs) * 100;

@@ -166,9 +166,9 @@ Optimized title:`;
       }, {});
 
       const sortedTrends = Object.entries(keywordFrequency)
-        .sort(([, a], [, b]) => b - a)
+        .sort((a, b) => (b[1] as number) - (a[1] as number))
         .slice(0, 10)
-        .map(([keyword, count]) => ({ keyword, count }));
+        .map(([keyword, count]) => ({ keyword, count: count as number }));
 
       return {
         topTrends: sortedTrends,
