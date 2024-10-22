@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { JobProcessingService } from './job-processing.service';
 import axios, { AxiosError } from 'axios';
+import { retry, catchError } from 'rxjs/operators';
+import { from, throwError } from 'rxjs';
 
 export interface JobData {
   id: string;
@@ -26,6 +28,8 @@ export class JobIngestionService {
   private readonly MAX_RETRIES: number;
   private readonly SCRAPINGDOG_API_KEY: string;
   private readonly SCRAPINGDOG_API_URL: string = 'https://api.scrapingdog.com/linkedinjobs';
+  private jobCache: Map<string, { data: JobData; timestamp: number }> = new Map();
+  private readonly CACHE_EXPIRY: number = 3600000; // 1 hour in milliseconds
 
   constructor(
     private configService: ConfigService,
@@ -60,12 +64,19 @@ export class JobIngestionService {
     try {
       await this.enforceRateLimit();
       
+      const cachedJob = this.getCachedJob(jobId);
+      if (cachedJob) {
+        this.logger.log(`Retrieved job ${jobId} from cache`);
+        return cachedJob;
+      }
+
       const startTime = Date.now();
       const job = await this.scrapeLinkedInJob(jobId);
       const endTime = Date.now();
       this.logger.log(`Successfully scraped job from LinkedIn in ${endTime - startTime}ms`);
 
       const insertedJob = await this.insertJob(job);
+      this.cacheJob(jobId, insertedJob);
 
       this.logScrapingStats(startTime, Date.now(), 1, insertedJob ? 1 : 0);
       return insertedJob;
@@ -75,38 +86,35 @@ export class JobIngestionService {
     }
   }
 
-  private async scrapeLinkedInJob(jobId: string): Promise<JobData> {
-    this.logger.log(`Scraping LinkedIn job with ID: ${jobId}`);
-    try {
-      const response = await axios.get(this.SCRAPINGDOG_API_URL, {
-        params: {
-          api_key: this.SCRAPINGDOG_API_KEY,
-          job_id: jobId,
-        },
-      });
-
+  private scrapeLinkedInJob(jobId: string) {
+    return from(axios.get(this.SCRAPINGDOG_API_URL, {
+      params: {
+        api_key: this.SCRAPINGDOG_API_KEY,
+        job_id: jobId,
+      },
+    })).pipe(
+      retry(this.MAX_RETRIES),
+      catchError((error: AxiosError) => {
+        if (error.response) {
+          this.logger.error(`ScrapingDog API error: ${error.response.status} - ${error.response.statusText}`);
+          return throwError(() => new HttpException(`ScrapingDog API error: ${error.response.status} - ${error.response.statusText}`, HttpStatus.BAD_GATEWAY));
+        } else if (error.request) {
+          this.logger.error('No response received from ScrapingDog API');
+          return throwError(() => new HttpException('No response received from ScrapingDog API', HttpStatus.GATEWAY_TIMEOUT));
+        }
+        this.logger.error(`Error scraping LinkedIn job: ${error.message}`);
+        return throwError(() => new HttpException('Error scraping LinkedIn job', HttpStatus.INTERNAL_SERVER_ERROR));
+      })
+    ).toPromise().then(response => {
       if (response.status !== 200) {
         throw new HttpException(`ScrapingDog API returned status code ${response.status}`, HttpStatus.BAD_GATEWAY);
       }
       if (!response.data || response.data.length === 0) {
         throw new HttpException('No job data returned from ScrapingDog API', HttpStatus.NOT_FOUND);
       }
-
       this.logger.log(`Successfully scraped job data for job ID: ${jobId}`);
       return this.mapScrapedDataToJobData(response.data[0]);
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (error.response) {
-          this.logger.error(`ScrapingDog API error: ${error.response.status} - ${error.response.statusText}`);
-          throw new HttpException(`ScrapingDog API error: ${error.response.status} - ${error.response.statusText}`, HttpStatus.BAD_GATEWAY);
-        } else if (error.request) {
-          this.logger.error('No response received from ScrapingDog API');
-          throw new HttpException('No response received from ScrapingDog API', HttpStatus.GATEWAY_TIMEOUT);
-        }
-      }
-      this.logger.error(`Error scraping LinkedIn job: ${error.message}`);
-      throw new HttpException('Error scraping LinkedIn job', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    });
   }
 
   private mapScrapedDataToJobData(scrapedData: any): JobData {
@@ -149,6 +157,12 @@ export class JobIngestionService {
   async getJobById(jobId: string): Promise<JobData | null> {
     this.logger.debug(`Fetching job with ID: ${jobId}`);
     try {
+      const cachedJob = this.getCachedJob(jobId);
+      if (cachedJob) {
+        this.logger.log(`Retrieved job ${jobId} from cache`);
+        return cachedJob;
+      }
+
       const { data, error } = await this.supabase
         .from('jobs')
         .select('*')
@@ -161,7 +175,9 @@ export class JobIngestionService {
       }
 
       this.logger.debug(`Successfully fetched job with ID: ${jobId}`);
-      return data as JobData;
+      const job = data as JobData;
+      this.cacheJob(jobId, job);
+      return job;
     } catch (error) {
       this.logger.error(`Error fetching job: ${error.message}`);
       return null;
@@ -202,5 +218,30 @@ export class JobIngestionService {
       Successfully Inserted Jobs: ${successfulJobs}
       Success Rate: ${successRate.toFixed(2)}%
     `);
+  }
+
+  private getCachedJob(jobId: string): JobData | null {
+    const cachedJob = this.jobCache.get(jobId);
+    if (cachedJob && Date.now() - cachedJob.timestamp < this.CACHE_EXPIRY) {
+      return cachedJob.data;
+    }
+    return null;
+  }
+
+  private cacheJob(jobId: string, job: JobData): void {
+    this.jobCache.set(jobId, { data: job, timestamp: Date.now() });
+  }
+
+  async batchScrapeAndIngestJobs(jobIds: string[]): Promise<JobData[]> {
+    const results: JobData[] = [];
+    for (const jobId of jobIds) {
+      try {
+        const job = await this.scrapeAndIngestLinkedInJobs(jobId);
+        results.push(job);
+      } catch (error) {
+        this.logger.error(`Failed to scrape and ingest job ${jobId}: ${error.message}`);
+      }
+    }
+    return results;
   }
 }

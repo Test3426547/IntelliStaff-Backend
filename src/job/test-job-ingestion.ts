@@ -11,29 +11,39 @@ async function testJobIngestion() {
     const jobIngestionService = app.get(JobIngestionService);
 
     const testJobId = '3736845912'; // Example LinkedIn job ID
+    const testBatchJobIds = ['3736845912', '3736845913', '3736845914']; // Example batch of job IDs
 
     logger.log('Starting job scraping and ingestion test...');
-    logger.debug(`Test Job ID: ${testJobId}`);
 
+    // Test single job scraping
+    logger.log('Testing single job scraping...');
     const startTime = Date.now();
-    logger.log('Scraping and ingesting LinkedIn job...');
     const scrapedJob = await jobIngestionService.scrapeAndIngestLinkedInJobs(testJobId);
     const endTime = Date.now();
-
     logger.log(`Successfully scraped and ingested job in ${endTime - startTime}ms`);
-    logger.debug('Scraped job data:');
-    logger.debug(JSON.stringify(scrapedJob, null, 2));
+    logger.debug('Scraped job data:', scrapedJob);
 
-    logger.log('Fetching job from database...');
-    const fetchedJob = await jobIngestionService.getJobById(scrapedJob.id);
-    logger.log('Fetched job from database:');
-    logger.debug(JSON.stringify(fetchedJob, null, 2));
+    // Test job retrieval from cache
+    logger.log('Testing job retrieval from cache...');
+    const cachedStartTime = Date.now();
+    const cachedJob = await jobIngestionService.scrapeAndIngestLinkedInJobs(testJobId);
+    const cachedEndTime = Date.now();
+    logger.log(`Retrieved job from cache in ${cachedEndTime - cachedStartTime}ms`);
+    logger.debug('Cached job data:', cachedJob);
 
-    logger.log('Listing jobs...');
+    // Test batch job scraping
+    logger.log('Testing batch job scraping...');
+    const batchStartTime = Date.now();
+    const batchJobs = await jobIngestionService.batchScrapeAndIngestJobs(testBatchJobIds);
+    const batchEndTime = Date.now();
+    logger.log(`Successfully scraped and ingested ${batchJobs.length} jobs in ${batchEndTime - batchStartTime}ms`);
+    logger.debug('Batch scraped jobs:', batchJobs);
+
+    // Test job listing
+    logger.log('Testing job listing...');
     const { jobs, total } = await jobIngestionService.listJobs(1, 10);
     logger.log(`Total jobs in database: ${total}`);
-    logger.debug('Sample of stored jobs:');
-    logger.debug(JSON.stringify(jobs.slice(0, 3), null, 2));
+    logger.debug('Sample of stored jobs:', jobs.slice(0, 3));
 
     logger.log('Job ingestion test completed successfully');
   } catch (error) {
